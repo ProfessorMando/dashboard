@@ -1,0 +1,1125 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Portfolio Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ========================================
+   FINNHUB API KEY — Replace with your own
+   ======================================== */
+
+/* Design Tokens */
+:root {
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Menlo', monospace;
+
+  --text-xs:   clamp(0.75rem, 0.7rem + 0.25vw, 0.8125rem);
+  --text-sm:   clamp(0.8125rem, 0.78rem + 0.2vw, 0.875rem);
+  --text-base: clamp(0.875rem, 0.85rem + 0.15vw, 0.9375rem);
+  --text-lg:   clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+  --text-xl:   clamp(1.25rem, 1.1rem + 0.6vw, 1.5rem);
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+
+  --transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Dark mode (default) */
+:root, [data-theme="dark"] {
+  --bg: #0d0f12;
+  --surface: #141720;
+  --surface-2: #1a1e2a;
+  --surface-3: #212636;
+  --border: #2a3040;
+  --border-subtle: #1e2333;
+  --text: #e2e4ea;
+  --text-muted: #8a8fa0;
+  --text-faint: #555b6e;
+  --accent: #5b9cf5;
+  --accent-hover: #4a8be4;
+  --green: #34d399;
+  --green-bg: rgba(52, 211, 153, 0.08);
+  --green-border: rgba(52, 211, 153, 0.15);
+  --red: #f87171;
+  --red-bg: rgba(248, 113, 113, 0.08);
+  --red-border: rgba(248, 113, 113, 0.15);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
+}
+
+/* Light mode */
+[data-theme="light"] {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #f9fafb;
+  --surface-3: #f0f1f4;
+  --border: #dfe1e6;
+  --border-subtle: #ecedf0;
+  --text: #1a1d26;
+  --text-muted: #656a7b;
+  --text-faint: #a0a4b2;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --green: #16a34a;
+  --green-bg: rgba(22, 163, 74, 0.06);
+  --green-border: rgba(22, 163, 74, 0.12);
+  --red: #dc2626;
+  --red-bg: rgba(220, 38, 38, 0.06);
+  --red-border: rgba(220, 38, 38, 0.12);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #f4f5f7;
+    --surface: #ffffff;
+    --surface-2: #f9fafb;
+    --surface-3: #f0f1f4;
+    --border: #dfe1e6;
+    --border-subtle: #ecedf0;
+    --text: #1a1d26;
+    --text-muted: #656a7b;
+    --text-faint: #a0a4b2;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --green: #16a34a;
+    --green-bg: rgba(22, 163, 74, 0.06);
+    --green-border: rgba(22, 163, 74, 0.12);
+    --red: #dc2626;
+    --red-bg: rgba(220, 38, 38, 0.06);
+    --red-border: rgba(220, 38, 38, 0.12);
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+  }
+}
+
+/* Reset & Base */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100dvh;
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+button { cursor: pointer; background: none; border: none; font: inherit; color: inherit; }
+
+/* Layout */
+.dashboard {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .dashboard { padding: var(--space-8) var(--space-6); }
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.header-logo {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+
+.header-logo svg { width: 20px; height: 20px; color: #fff; }
+
+.header h1 {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+.btn-icon:hover { color: var(--text); border-color: var(--text-faint); }
+
+.btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* Status bar */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: 9999px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.status-dot.loading {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+  background: var(--accent);
+}
+
+.status-dot.error { background: var(--red); }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Section headers */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  margin-top: var(--space-8);
+}
+
+.section-header:first-of-type { margin-top: 0; }
+
+.section-header h2 {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.section-header .count {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+/* Market Indicators Grid */
+.indicators-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-8);
+}
+
+@media (min-width: 640px) {
+  .indicators-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.indicator-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  transition: border-color var(--transition);
+}
+
+.indicator-card:hover { border-color: var(--border); }
+
+.indicator-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.indicator-name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.indicator-symbol {
+  font-size: var(--text-xs);
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  background: var(--surface-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.indicator-value {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
+}
+
+.indicator-change {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.indicator-desc {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  line-height: 1.5;
+  margin-top: var(--space-1);
+}
+
+/* Stock Cards Grid */
+.stocks-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+}
+
+@media (min-width: 640px) {
+  .stocks-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (min-width: 1024px) {
+  .stocks-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+@media (min-width: 1200px) {
+  .stocks-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Stock Card */
+.stock-card {
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  transition: border-color var(--transition);
+}
+
+.stock-card:hover { border-color: var(--border); }
+
+/* Card header */
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.card-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.card-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid var(--border-subtle);
+}
+
+.card-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.card-logo-fallback {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.card-title {
+  min-width: 0;
+}
+
+.card-symbol {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.card-name {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.card-industry {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  background: var(--surface-3);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  align-self: flex-start;
+}
+
+/* Price section */
+.card-price {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.price-current {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.02em;
+}
+
+.price-change {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.positive { color: var(--green); }
+.negative { color: var(--red); }
+.price-change.positive { background: var(--green-bg); border: 1px solid var(--green-border); }
+.price-change.negative { background: var(--red-bg); border: 1px solid var(--red-border); }
+
+.price-change svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Metrics grid */
+.card-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-1) var(--space-4);
+}
+
+.metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.metric:nth-last-child(-n+2) {
+  border-bottom: none;
+}
+
+.metric-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.metric-value {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  text-align: right;
+}
+
+/* News section in card */
+.card-news {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-3);
+}
+
+.card-news-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--space-2);
+}
+
+.news-item {
+  display: block;
+  padding: var(--space-1) 0;
+  text-decoration: none;
+  color: var(--text);
+  transition: color var(--transition);
+}
+
+.news-item:hover { color: var(--accent); }
+
+.news-headline {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.news-meta {
+  font-size: 0.6875rem;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+
+/* Skeleton loaders */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-text { height: 1em; margin-bottom: var(--space-1); }
+.skeleton-heading { height: 1.75em; width: 50%; }
+.skeleton-price { height: 2em; width: 40%; }
+.skeleton-metric { height: 0.9em; width: 100%; }
+
+/* Error banner */
+.error-banner {
+  background: var(--red-bg);
+  border: 1px solid var(--red-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--red);
+}
+
+.error-banner svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* Spinning refresh icon */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinning svg { animation: spin 0.8s linear infinite; }
+
+/* Footer */
+.footer {
+  margin-top: var(--space-12);
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--border-subtle);
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.footer a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+.footer a:hover { color: var(--accent); }
+
+/* Focus */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .header { gap: var(--space-3); }
+  .header h1 { font-size: var(--text-lg); }
+  .card-metrics { grid-template-columns: 1fr; }
+  .metric:last-child { border-bottom: none; }
+  .metric:nth-last-child(2) { border-bottom: 1px solid var(--border-subtle); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="dashboard">
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="header-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
+          <polyline points="16 7 22 7 22 13"/>
+        </svg>
+      </div>
+      <h1>Portfolio Dashboard</h1>
+    </div>
+    <div class="header-actions">
+      <button class="btn-icon" id="themeToggle" aria-label="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <button class="btn btn-primary" id="refreshBtn" onclick="refreshAll()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Refresh
+      </button>
+    </div>
+  </header>
+
+  <!-- Status -->
+  <div class="status-bar">
+    <div class="status-pill">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Initializing...</span>
+    </div>
+    <div class="status-pill" id="timestampPill" style="display:none;">
+      <span id="lastUpdated"></span>
+    </div>
+  </div>
+
+  <!-- Error banner (hidden by default) -->
+  <div class="error-banner" id="errorBanner" style="display:none;">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <span id="errorText"></span>
+  </div>
+
+  <!-- Market Indicators -->
+  <div class="section-header">
+    <h2>Market Indicators</h2>
+    <span class="count">2 indices</span>
+  </div>
+  <div class="indicators-grid" id="indicatorsGrid">
+    <!-- Populated by JS -->
+  </div>
+
+  <!-- Stock Holdings -->
+  <div class="section-header">
+    <h2>Stock Holdings</h2>
+    <span class="count">10 stocks</span>
+  </div>
+  <div class="stocks-grid" id="stocksGrid">
+    <!-- Populated by JS -->
+  </div>
+
+  <footer class="footer">
+    Data provided by <a href="https://finnhub.io" target="_blank" rel="noopener noreferrer">Finnhub</a>
+    &nbsp;&middot;&nbsp;
+    <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">Created with Perplexity Computer</a>
+  </footer>
+</div>
+
+<script>
+// =============================================
+// FINNHUB API KEY — Replace with your own key
+// =============================================
+const FINNHUB_API_KEY = 'd6se621r01qj447bb6v0d6se621r01qj447bb6vg';
+
+// =============================================
+// Configuration
+// =============================================
+const API_BASE = 'https://finnhub.io/api/v1';
+
+const STOCKS = [
+  { symbol: 'AAPL',  name: 'Apple' },
+  { symbol: 'NVDA',  name: 'NVIDIA' },
+  { symbol: 'MSFT',  name: 'Microsoft' },
+  { symbol: 'JPM',   name: 'JPMorgan Chase' },
+  { symbol: 'AMZN',  name: 'Amazon' },
+  { symbol: 'WMT',   name: 'Walmart' },
+  { symbol: 'XOM',   name: 'ExxonMobil' },
+  { symbol: 'CAT',   name: 'Caterpillar' },
+  { symbol: 'FDX',   name: 'FedEx' },
+  { symbol: 'JNJ',   name: 'Johnson & Johnson' }
+];
+
+const INDICATORS = [
+  {
+    symbol: 'SPY',
+    name: 'S&P 500',
+    label: 'SPX',
+    description: 'Tracks the 500 largest U.S. companies by market capitalization. The most widely followed benchmark for overall U.S. stock market performance.',
+    note: 'Tracked via SPY ETF'
+  },
+  {
+    symbol: 'DIA',
+    name: 'Dow Jones Industrial Average',
+    label: 'DJIA',
+    description: 'Price-weighted index of 30 prominent U.S. blue-chip companies. One of the oldest and most recognized market indicators.',
+    note: 'Tracked via DIA ETF'
+  }
+];
+
+// =============================================
+// Helpers
+// =============================================
+function apiUrl(endpoint, params = {}) {
+  const url = new URL(API_BASE + endpoint);
+  url.searchParams.set('token', FINNHUB_API_KEY);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  return url.toString();
+}
+
+async function apiFetch(endpoint, params = {}) {
+  const res = await fetch(apiUrl(endpoint, params));
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
+function formatPrice(n) {
+  if (n == null || isNaN(n)) return '--';
+  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+function formatLargeNumber(n) {
+  if (n == null || isNaN(n)) return '--';
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'T';
+  if (n >= 1e3) return '$' + (n / 1e3).toFixed(1) + 'B';
+  return '$' + n.toFixed(1) + 'M';
+}
+
+function formatPercent(n) {
+  if (n == null || isNaN(n)) return '--';
+  return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+}
+
+function formatChange(d) {
+  if (d == null || isNaN(d)) return '--';
+  return (d >= 0 ? '+' : '') + d.toFixed(2);
+}
+
+function changeClass(n) {
+  if (n == null || n === 0) return '';
+  return n > 0 ? 'positive' : 'negative';
+}
+
+function arrowSvg(isPositive) {
+  if (isPositive) {
+    return '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 10V2M6 2L2 6M6 2l4 4"/></svg>';
+  }
+  return '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2v8M6 10l-4-4M6 10l4-4"/></svg>';
+}
+
+function timeAgo(unixSec) {
+  const now = Date.now() / 1000;
+  const diff = now - unixSec;
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  const d = new Date(unixSec * 1000);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function todayStr() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function weekAgoStr() {
+  const d = new Date();
+  d.setDate(d.getDate() - 7);
+  return d.toISOString().split('T')[0];
+}
+
+// =============================================
+// Rendering: Market Indicators
+// =============================================
+function renderIndicatorSkeleton(ind) {
+  return `
+    <div class="indicator-card" id="indicator-${ind.symbol}">
+      <div class="indicator-top">
+        <div>
+          <div class="indicator-name">${ind.name}</div>
+        </div>
+        <span class="indicator-symbol">${ind.label}</span>
+      </div>
+      <div class="skeleton skeleton-price" style="margin-top:var(--space-1)"></div>
+      <div class="skeleton skeleton-text" style="width:30%"></div>
+      <div class="indicator-desc">${ind.description}</div>
+    </div>
+  `;
+}
+
+function renderIndicator(ind, quote) {
+  const isUp = quote.d >= 0;
+  return `
+    <div class="indicator-card" id="indicator-${ind.symbol}">
+      <div class="indicator-top">
+        <div>
+          <div class="indicator-name">${ind.name}</div>
+        </div>
+        <span class="indicator-symbol">${ind.label}</span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:var(--space-3);flex-wrap:wrap">
+        <div class="indicator-value">${formatPrice(quote.c)}</div>
+        <span class="price-change ${changeClass(quote.d)}">
+          ${arrowSvg(isUp)}
+          ${formatChange(quote.d)} (${formatPercent(quote.dp)})
+        </span>
+      </div>
+      <div class="indicator-desc">${ind.description}<br><span style="opacity:0.7">${ind.note}</span></div>
+    </div>
+  `;
+}
+
+// =============================================
+// Rendering: Stock Cards
+// =============================================
+function renderStockSkeleton(stock) {
+  return `
+    <div class="stock-card" id="stock-${stock.symbol}">
+      <div class="card-header">
+        <div class="card-identity">
+          <div class="card-logo"><span class="card-logo-fallback">${stock.symbol.substring(0, 2)}</span></div>
+          <div class="card-title">
+            <div class="card-symbol">${stock.symbol}</div>
+            <div class="card-name">${stock.name}</div>
+          </div>
+        </div>
+      </div>
+      <div class="card-price">
+        <div class="skeleton skeleton-price"></div>
+      </div>
+      <div class="card-metrics">
+        ${Array(4).fill('<div class="metric"><div class="skeleton skeleton-metric"></div></div>').join('')}
+      </div>
+      <div class="card-news">
+        <div class="card-news-title">Recent News</div>
+        ${Array(3).fill('<div class="skeleton skeleton-text" style="margin-bottom:var(--space-2)"></div>').join('')}
+      </div>
+    </div>
+  `;
+}
+
+function renderStockCard(stock, quote, profile, metrics, news) {
+  const isUp = quote.d >= 0;
+  const peRatio = metrics?.metric?.peTTM;
+  const high52 = metrics?.metric?.['52WeekHigh'];
+  const low52 = metrics?.metric?.['52WeekLow'];
+  const mktCap = profile?.marketCapitalization; // in millions
+
+  const logoHtml = profile?.logo
+    ? `<img src="${profile.logo}" alt="${stock.symbol}" onerror="this.parentElement.innerHTML='<span class=\\'card-logo-fallback\\'>${stock.symbol.substring(0,2)}</span>'">`
+    : `<span class="card-logo-fallback">${stock.symbol.substring(0, 2)}</span>`;
+
+  const industryHtml = profile?.finnhubIndustry
+    ? `<span class="card-industry">${profile.finnhubIndustry}</span>`
+    : '';
+
+  const newsHtml = (news && news.length > 0)
+    ? news.slice(0, 3).map(n => `
+        <a class="news-item" href="${n.url}" target="_blank" rel="noopener noreferrer">
+          <div class="news-headline">${n.headline}</div>
+          <div class="news-meta">${n.source} &middot; ${timeAgo(n.datetime)}</div>
+        </a>
+      `).join('')
+    : '<div style="font-size:var(--text-xs);color:var(--text-faint);padding:var(--space-1) 0">No recent news available</div>';
+
+  return `
+    <div class="stock-card" id="stock-${stock.symbol}">
+      <div class="card-header">
+        <div class="card-identity">
+          <div class="card-logo">${logoHtml}</div>
+          <div class="card-title">
+            <div class="card-symbol">${stock.symbol}</div>
+            <div class="card-name">${profile?.name || stock.name}</div>
+          </div>
+        </div>
+        ${industryHtml}
+      </div>
+      <div class="card-price">
+        <span class="price-current">${formatPrice(quote.c)}</span>
+        <span class="price-change ${changeClass(quote.d)}">
+          ${arrowSvg(isUp)}
+          ${formatChange(quote.d)} (${formatPercent(quote.dp)})
+        </span>
+      </div>
+      <div class="card-metrics">
+        <div class="metric">
+          <span class="metric-label">P/E (TTM)</span>
+          <span class="metric-value">${peRatio != null ? peRatio.toFixed(2) : '--'}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Market Cap</span>
+          <span class="metric-value">${formatLargeNumber(mktCap)}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">52W High</span>
+          <span class="metric-value">${high52 != null ? formatPrice(high52) : '--'}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">52W Low</span>
+          <span class="metric-value">${low52 != null ? formatPrice(low52) : '--'}</span>
+        </div>
+      </div>
+      <div class="card-news">
+        <div class="card-news-title">Recent News</div>
+        ${newsHtml}
+      </div>
+    </div>
+  `;
+}
+
+// =============================================
+// Data Fetching
+// =============================================
+let isLoading = false;
+
+function setStatus(state, msg) {
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  dot.className = 'status-dot' + (state === 'loading' ? ' loading' : state === 'error' ? ' error' : '');
+  text.textContent = msg;
+}
+
+function showError(msg) {
+  const banner = document.getElementById('errorBanner');
+  document.getElementById('errorText').textContent = msg;
+  banner.style.display = 'flex';
+  setTimeout(() => { banner.style.display = 'none'; }, 12000);
+}
+
+function setTimestamp() {
+  const pill = document.getElementById('timestampPill');
+  const ts = document.getElementById('lastUpdated');
+  const now = new Date();
+  ts.textContent = 'Updated ' + now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  pill.style.display = '';
+}
+
+async function fetchIndicators() {
+  const grid = document.getElementById('indicatorsGrid');
+  grid.innerHTML = INDICATORS.map(renderIndicatorSkeleton).join('');
+
+  const results = await Promise.allSettled(
+    INDICATORS.map(ind => apiFetch('/quote', { symbol: ind.symbol }))
+  );
+
+  results.forEach((res, i) => {
+    const ind = INDICATORS[i];
+    const el = document.getElementById(`indicator-${ind.symbol}`);
+    if (res.status === 'fulfilled') {
+      el.outerHTML = renderIndicator(ind, res.value);
+    } else {
+      el.querySelector('.skeleton-price').outerHTML =
+        '<div style="color:var(--text-faint);font-size:var(--text-sm)">Failed to load</div>';
+    }
+  });
+}
+
+async function fetchStockData(stock) {
+  const today = todayStr();
+  const weekAgo = weekAgoStr();
+
+  const [quote, profile, metrics, news] = await Promise.allSettled([
+    apiFetch('/quote', { symbol: stock.symbol }),
+    apiFetch('/stock/profile2', { symbol: stock.symbol }),
+    apiFetch('/stock/metric', { symbol: stock.symbol, metric: 'all' }),
+    apiFetch('/company-news', { symbol: stock.symbol, from: weekAgo, to: today })
+  ]);
+
+  return {
+    quote: quote.status === 'fulfilled' ? quote.value : null,
+    profile: profile.status === 'fulfilled' ? profile.value : null,
+    metrics: metrics.status === 'fulfilled' ? metrics.value : null,
+    news: news.status === 'fulfilled' ? news.value : null
+  };
+}
+
+async function fetchAllStocks() {
+  const grid = document.getElementById('stocksGrid');
+  grid.innerHTML = STOCKS.map(renderStockSkeleton).join('');
+
+  // Fetch in batches of 3 to respect rate limits (30 calls/sec free tier)
+  const batchSize = 3;
+  for (let i = 0; i < STOCKS.length; i += batchSize) {
+    const batch = STOCKS.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      batch.map(s => fetchStockData(s))
+    );
+
+    results.forEach((res, j) => {
+      const stock = batch[j];
+      const el = document.getElementById(`stock-${stock.symbol}`);
+      if (res.status === 'fulfilled' && res.value.quote) {
+        const { quote, profile, metrics, news } = res.value;
+        el.outerHTML = renderStockCard(stock, quote, profile, metrics, news);
+      } else {
+        // Show partial error
+        el.querySelector('.card-price').innerHTML =
+          '<div style="color:var(--red);font-size:var(--text-sm)">Failed to load data</div>';
+      }
+    });
+
+    // Small delay between batches
+    if (i + batchSize < STOCKS.length) {
+      await new Promise(r => setTimeout(r, 350));
+    }
+  }
+}
+
+async function refreshAll() {
+  if (isLoading) return;
+  isLoading = true;
+
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  btn.disabled = true;
+  document.getElementById('errorBanner').style.display = 'none';
+
+  setStatus('loading', 'Fetching live data...');
+
+  try {
+    await Promise.all([fetchIndicators(), fetchAllStocks()]);
+    setStatus('live', 'Live');
+    setTimestamp();
+  } catch (err) {
+    setStatus('error', 'Error');
+    showError('Some data could not be loaded. Check your API key or try again.');
+    console.error(err);
+  } finally {
+    isLoading = false;
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+  }
+}
+
+// =============================================
+// Theme Toggle
+// =============================================
+(function() {
+  const toggle = document.getElementById('themeToggle');
+  const root = document.documentElement;
+  let theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  root.setAttribute('data-theme', theme);
+  updateToggleIcon();
+
+  toggle.addEventListener('click', () => {
+    theme = theme === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', theme);
+    updateToggleIcon();
+  });
+
+  function updateToggleIcon() {
+    toggle.innerHTML = theme === 'dark'
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+    toggle.setAttribute('aria-label', 'Switch to ' + (theme === 'dark' ? 'light' : 'dark') + ' mode');
+  }
+})();
+
+// =============================================
+// Initialize
+// =============================================
+refreshAll();
+</script>
+</body>
+</html>

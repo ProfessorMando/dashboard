@@ -2,9 +2,74 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { createProviderRequester, mapWithConcurrency, refreshQuotes } from '../worker/refresh.js';
+import {
+  createProviderRequester,
+  findUninitializedRefreshJobs,
+  mapWithConcurrency,
+  refreshQuotes,
+} from '../worker/refresh.js';
 import worker from '../worker/index.js';
 import { fetchFinnhub, ProviderRateLimitError } from '../worker/providers.js';
+
+
+test('scheduled bootstrap identifies only datasets with no stored records', async function () {
+  const storedTypes = new Set(['quotes', 'metrics']);
+  const db = {
+    prepare(sql) {
+      assert.match(sql, /FROM market_records/);
+      return {
+        bind(dataType) {
+          return {
+            async all() {
+              return {
+                results: storedTypes.has(dataType)
+                  ? [{
+                      symbol: 'AAPL',
+                      data: JSON.stringify({ value: true }),
+                      updated_at: '2026-06-11T21:15:00.000Z',
+                      checked_at: '2026-06-11T21:15:00.000Z',
+                      provider_status: JSON.stringify({ ok: true }),
+                    }]
+                  : [],
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const jobs = await findUninitializedRefreshJobs({ DB: db }, ['quotes']);
+
+  assert.deepEqual(jobs, ['profiles', 'news', 'historical']);
+});
+
+test('scheduled bootstrap does not repeat initialized datasets even when records contain failures', async function () {
+  const db = {
+    prepare(sql) {
+      assert.match(sql, /FROM market_records/);
+      return {
+        bind(dataType) {
+          return {
+            async all() {
+              return {
+                results: [{
+                  symbol: dataType === 'historical' ? 'historical|symbol=AAPL' : 'AAPL',
+                  data: null,
+                  updated_at: null,
+                  checked_at: '2026-06-11T21:15:00.000Z',
+                  provider_status: JSON.stringify({ ok: false, code: 'rate_limited' }),
+                }],
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  assert.deepEqual(await findUninitializedRefreshJobs({ DB: db }, []), []);
+});
 
 test('mapWithConcurrency preserves order and enforces the configured limit', async function () {
   let active = 0;

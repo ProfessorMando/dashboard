@@ -29,6 +29,8 @@ npx wrangler d1 migrations apply DB --local
 npx wrangler dev --test-scheduled
 ```
 
+On every scheduled invocation, the Worker also initializes any dataset that has no D1 records yet. This makes a newly provisioned database populate promptly; once records exist, the normal cadences below apply and the bootstrap pass does not repeat that dataset.
+
 The configured Cron Triggers refresh data at different cadences:
 
 - Quotes: every 5 minutes.

@@ -16,7 +16,7 @@ function getTTL(endpoint) {
 }
 
 // =============================================
-// Rate Limiter — serializes API calls at 1 req/sec
+// Rate Limiter — serializes API calls
 // =============================================
 class RateLimiter {
   constructor(maxPerSec) {
@@ -33,9 +33,10 @@ class RateLimiter {
   }
 }
 
-const limiter = new RateLimiter(1);
+const finnhubLimiter = new RateLimiter(0.5);
+const avLimiter = new RateLimiter(0.5);
 
-async function fetchWithRateLimit(url) {
+async function fetchWithRateLimit(url, limiter) {
   await limiter.acquire();
   return fetch(url);
 }
@@ -56,7 +57,7 @@ async function handleFinnhub(endpoint, searchParams, env, ctx) {
 
   if (!response) {
     cacheHit = false;
-    response = await fetchWithRateLimit(url);
+    response = await fetchWithRateLimit(url, finnhubLimiter);
 
     const ttl = getTTL(endpoint);
     const headers = new Headers(response.headers);
@@ -155,7 +156,7 @@ async function handleCandle(symbol, from, to, env, ctx) {
     params.set('apikey', env.ALPHA_VANTAGE_API_KEY);
     const avUrl = AV_BASE + '?' + params.toString();
 
-    const response = await fetchWithRateLimit(avUrl);
+    const response = await fetchWithRateLimit(avUrl, avLimiter);
     const raw = await response.json();
 
     if (raw['Error Message'] || raw['Note']) {

@@ -40,6 +40,31 @@ function summarizeRecords(records, symbols, maxAgeSeconds) {
   };
 }
 
+function storedProviderFailure(recordGroups) {
+  const failures = recordGroups.flatMap(function (records) {
+    return Object.values(records).filter(function (record) {
+      return record && record.data === null && record.providerStatus
+        && record.providerStatus.ok === false;
+    }).map(function (record) { return record.providerStatus; });
+  });
+  if (!failures.length) return null;
+
+  return failures.sort(function (left, right) {
+    return (right.downstreamStatus || 502) - (left.downstreamStatus || 502);
+  })[0];
+}
+
+function providerErrorResponse(failure) {
+  return jsonResponse({
+    error: {
+      code: failure.code || 'provider_unavailable',
+      message: 'No stored market data is available',
+      provider: failure.provider || 'unknown',
+    },
+    stale: false,
+  }, failure.downstreamStatus || 502);
+}
+
 async function handleDashboard(env) {
   const entries = await Promise.all([
     getMarketRecords(env.DB, SNAPSHOT_KEYS.quotes),
@@ -52,6 +77,14 @@ async function handleDashboard(env) {
   const metrics = summarizeRecords(entries[2], STOCKS, MAX_AGE_SECONDS.metrics);
   const news = summarizeRecords(entries[3], STOCKS, MAX_AGE_SECONDS.news);
   const categories = { quotes: quotes, profiles: profiles, metrics: metrics, news: news };
+  const hasStoredData = Object.values(categories).some(function (entry) {
+    return Object.keys(entry.data).length > 0;
+  });
+  if (!hasStoredData) {
+    const failure = storedProviderFailure(entries);
+    if (failure) return providerErrorResponse(failure);
+  }
+
   const updatedTimes = Object.values(categories).map(function (entry) {
     return entry.updatedAt;
   }).filter(Boolean);
@@ -91,6 +124,10 @@ async function handleHistorical(url, env) {
   const records = await getMarketRecords(env.DB, 'historical');
   const metadata = summarizeRecords(records, ALL_SYMBOLS, MAX_AGE_SECONDS.historical);
   const series = await getHistoricalSeries(env.DB, dateDaysAgo(days));
+  if (!Object.keys(series).length) {
+    const failure = storedProviderFailure([records]);
+    if (failure) return providerErrorResponse(failure);
+  }
 
   return jsonResponse({
     updatedAt: metadata.updatedAt,

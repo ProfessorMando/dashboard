@@ -212,6 +212,16 @@ async function handleAPI(request, env, ctx) {
 
   const endpoint = url.pathname.replace(/^\/api/, '');
 
+  if (endpoint === '/health') {
+    return new Response(JSON.stringify({
+      finnhubConfigured: Boolean(env.FINNHUB_API_KEY),
+      alphaVantageConfigured: Boolean(env.ALPHA_VANTAGE_API_KEY),
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    });
+  }
+
   if (endpoint === '/stock/candle') {
     const from = parseInt(url.searchParams.get('from'), 10);
     const to = parseInt(url.searchParams.get('to'), 10);
@@ -251,7 +261,7 @@ export default {
       try {
         return await handleAPI(request, env, ctx);
       } catch (e) {
-        return jsonError(502, e.message || 'Internal error');
+        return jsonError(502, 'Upstream request failed');
       }
     }
 

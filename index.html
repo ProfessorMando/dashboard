@@ -946,7 +946,28 @@ async function apiFetch(endpoint, params = {}) {
   const url = new URL(API_BASE + endpoint, window.location.origin);
   Object.entries(params).forEach(function(kv) { url.searchParams.set(kv[0], kv[1]); });
   const res = await fetch(url.toString());
-  if (!res.ok) throw new Error('API error ' + res.status);
+  if (!res.ok) {
+    var serverMessage = '';
+    try {
+      const body = await res.text();
+      if (body) {
+        try {
+          const errorData = JSON.parse(body);
+          if (typeof errorData.error === 'string') serverMessage = errorData.error;
+          else if (typeof errorData.message === 'string') serverMessage = errorData.message;
+        } catch (e) {
+          serverMessage = body;
+        }
+      }
+    } catch (e) {
+      // Fall back to the HTTP status when the response body cannot be read.
+    }
+
+    serverMessage = serverMessage.replace(/([?&](?:token|api_?key)=)[^&\s]+/gi, '$1[redacted]').trim();
+    if (serverMessage.length > 300) serverMessage = serverMessage.slice(0, 300) + '…';
+
+    throw new Error('API error ' + res.status + (serverMessage ? ': ' + serverMessage : ''));
+  }
   const data = await res.json();
   if (data.error) throw new Error(data.error);
   return data;

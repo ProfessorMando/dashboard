@@ -7,6 +7,8 @@ directory = "./public"
 
 [[d1_databases]]
 binding = "DB"
+database_name = "dashboard-db"
+database_id = "c24d871e-8d3f-4d78-965b-b073270a0916"
 migrations_dir = "migrations"
 
 [triggers]

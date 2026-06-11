@@ -106,3 +106,28 @@ export async function getHistoricalSeries(db, fromDate) {
   }
   return series;
 }
+
+export async function getProviderBackoff(db, provider) {
+  const row = await db.prepare(`
+    SELECT next_allowed_at, updated_at, last_error
+    FROM provider_backoff
+    WHERE provider = ?
+  `).bind(provider).first();
+
+  return row ? {
+    nextAllowedAt: Number(row.next_allowed_at) || 0,
+    updatedAt: row.updated_at,
+    lastError: row.last_error,
+  } : { nextAllowedAt: 0, updatedAt: null, lastError: null };
+}
+
+export async function recordProviderBackoff(db, provider, nextAllowedAt, updatedAt, error) {
+  await db.prepare(`
+    INSERT INTO provider_backoff (provider, next_allowed_at, updated_at, last_error)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(provider) DO UPDATE SET
+      next_allowed_at = MAX(provider_backoff.next_allowed_at, excluded.next_allowed_at),
+      updated_at = excluded.updated_at,
+      last_error = excluded.last_error
+  `).bind(provider, nextAllowedAt, updatedAt, error).run();
+}

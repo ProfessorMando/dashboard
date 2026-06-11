@@ -6,7 +6,7 @@ A static market dashboard served by a Cloudflare Worker. Scheduled Worker jobs c
 
 The Worker requires:
 
-- `DB` — a D1 database containing current snapshots, refresh locks, provider status, and normalized historical closing prices.
+- `DB` — a D1 database containing current snapshots, refresh locks, provider backoff state, provider status, and normalized historical closing prices.
 - `FINNHUB_API_KEY` — an encrypted secret used by scheduled quote, profile, metric, and news refreshes.
 - `ALPHA_VANTAGE_API_KEY` — an encrypted secret used by the scheduled historical-price refresh.
 
@@ -36,7 +36,7 @@ The configured Cron Triggers refresh data at different cadences:
 - Company profiles: daily.
 - Historical daily closes: daily.
 
-Refresh jobs use both in-isolate single-flight coalescing and a D1 lease, preventing overlapping scheduled executions from duplicating provider work. Failed refreshes retain the last valid values while recording the failed provider check separately.
+Refresh jobs use explicit per-job concurrency limits, in-isolate single-flight coalescing, and D1 leases for both the job and provider account. Provider rate-limit responses use bounded, provider-specific exponential retries, with the next allowed request time persisted in D1 so later scheduled executions honor the same backoff. Failed refreshes retain the last valid values while recording the failed provider check separately.
 
 ## Read endpoints
 

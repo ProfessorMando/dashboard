@@ -7,8 +7,6 @@ directory = "./public"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "dashboard-market-data"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
 migrations_dir = "migrations"
 
 [triggers]

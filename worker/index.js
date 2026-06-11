@@ -16,7 +16,7 @@ function getTTL(endpoint) {
 }
 
 // =============================================
-// Rate Limiter — serializes API calls
+// Rate Limiter — assigns unique time slots atomically
 // =============================================
 class RateLimiter {
   constructor(maxPerSec) {
@@ -25,11 +25,13 @@ class RateLimiter {
   }
 
   async acquire() {
-    const now = Date.now();
-    if (now < this.nextTime) {
-      await new Promise(function (r) { setTimeout(r, this.nextTime - now); }.bind(this));
+    this.nextTime = Math.max(Date.now(), this.nextTime);
+    const myTime = this.nextTime;
+    this.nextTime = myTime + this.delay;
+    const wait = myTime - Date.now();
+    if (wait > 0) {
+      await new Promise(function (r) { setTimeout(r, wait); });
     }
-    this.nextTime = Math.max(now, this.nextTime) + this.delay;
   }
 }
 

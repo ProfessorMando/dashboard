@@ -642,12 +642,189 @@ button { cursor: pointer; background: none; border: none; font: inherit; color: 
   .metric:nth-last-child(2) { border-bottom: 1px solid var(--border-subtle); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
-}
+
+  /* ========================================
+     Tabs
+     ======================================== */
+  .tabs {
+    display: flex;
+    gap: var(--space-1);
+    margin-bottom: var(--space-6);
+    padding: var(--space-1);
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    width: fit-content;
+  }
+
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--text-muted);
+    transition: all var(--transition);
+  }
+
+  .tab:hover { color: var(--text); }
+
+  .tab.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .tab svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  /* ========================================
+     Tab Content
+     ======================================== */
+  .tab-content { display: block; }
+  .tab-content[hidden] { display: none; }
+
+  /* ========================================
+     Graph Section
+     ======================================== */
+  .graph-panel {
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    margin-bottom: var(--space-6);
+  }
+
+  .graph-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    margin-bottom: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .graph-panel-header h3 {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .graph-panel canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-sm);
+  }
+
+  /* ========================================
+     Time Range Buttons
+     ======================================== */
+  .time-range-btns {
+    display: flex;
+    gap: 2px;
+    background: var(--surface-3);
+    border-radius: var(--radius-md);
+    padding: 2px;
+  }
+
+  .time-range-btn {
+    padding: 3px var(--space-2);
+    border-radius: var(--radius-sm);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    transition: all var(--transition);
+    line-height: 1.4;
+  }
+
+  .time-range-btn:hover { color: var(--text); }
+
+  .time-range-btn.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .tr-bottom {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: var(--space-2);
+  }
+
+  /* ========================================
+     Legend
+     ======================================== */
+  .graph-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-top: var(--space-3);
+  }
+
+  .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px var(--space-2);
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all var(--transition);
+    user-select: none;
+  }
+
+  .legend-item:hover {
+    border-color: var(--border);
+    color: var(--text);
+  }
+
+  .legend-item.hidden {
+    opacity: 0.4;
+    text-decoration: line-through;
+  }
+
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ========================================
+     Graph Loading
+     ======================================== */
+  .graph-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 350px;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .graph-error {
+    color: var(--red);
+    font-size: var(--text-sm);
+    padding: var(--space-4);
+    text-align: center;
+  }
 </style>
 </head>
 <body>
@@ -675,6 +852,19 @@ button { cursor: pointer; background: none; border: none; font: inherit; color: 
     </div>
   </header>
 
+  <!-- Tabs -->
+  <nav class="tabs" id="tabBar">
+    <button class="tab active" data-tab="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </button>
+    <button class="tab" data-tab="graphs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+      Graphs
+    </button>
+  </nav>
+
+  <div id="dashboardContent" class="tab-content">
   <!-- Status -->
   <div class="status-bar">
     <div class="status-pill">
@@ -715,6 +905,29 @@ button { cursor: pointer; background: none; border: none; font: inherit; color: 
     &nbsp;&middot;&nbsp;
     <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">Created with Perplexity Computer</a>
   </footer>
+  </div>
+
+  <!-- Graphs Tab Content -->
+  <div id="graphsContent" class="tab-content" hidden>
+    <div class="graph-panel" id="stocksGraphPanel">
+      <div class="graph-panel-header">
+        <h3 id="stocksGraphTitle">Stock Prices</h3>
+      </div>
+      <div class="graph-loading" id="stocksGraphLoading">Loading graph data...</div>
+      <canvas id="stocksCanvas" style="display:none;"></canvas>
+      <div class="tr-bottom" id="stocksTimeRange"></div>
+      <div class="graph-legend" id="stocksLegend"></div>
+    </div>
+    <div class="graph-panel" id="indicatorsGraphPanel">
+      <div class="graph-panel-header">
+        <h3 id="indicatorsGraphTitle">Market Indicators</h3>
+      </div>
+      <div class="graph-loading" id="indicatorsGraphLoading">Loading graph data...</div>
+      <canvas id="indicatorsCanvas" style="display:none;"></canvas>
+      <div class="tr-bottom" id="indicatorsTimeRange"></div>
+      <div class="graph-legend" id="indicatorsLegend"></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -738,7 +951,16 @@ const STOCKS = [
   { symbol: 'XOM',   name: 'ExxonMobil' },
   { symbol: 'CAT',   name: 'Caterpillar' },
   { symbol: 'FDX',   name: 'FedEx' },
-  { symbol: 'JNJ',   name: 'Johnson & Johnson' }
+  { symbol: 'JNJ',   name: 'Johnson & Johnson' },
+  { symbol: 'GOOGL', name: 'Alphabet' },
+  { symbol: 'META',  name: 'Meta' },
+  { symbol: 'TSLA',  name: 'Tesla' },
+  { symbol: 'HD',    name: 'Home Depot' },
+  { symbol: 'PG',    name: 'Procter & Gamble' },
+  { symbol: 'V',     name: 'Visa' },
+  { symbol: 'UNH',   name: 'UnitedHealth' },
+  { symbol: 'NEE',   name: 'NextEra Energy' },
+  { symbol: 'SPCX',  name: 'SpaceX' }
 ];
 
 const INDICATORS = [
@@ -755,6 +977,27 @@ const INDICATORS = [
     label: 'DJIA',
     description: 'Price-weighted index of 30 prominent U.S. blue-chip companies. One of the oldest and most recognized market indicators.',
     note: 'Tracked via DIA ETF'
+  },
+  {
+    symbol: 'QQQ',
+    name: 'Nasdaq-100',
+    label: 'NDX',
+    description: 'Tracks the 100 largest non-financial companies listed on the Nasdaq. Heavily weighted toward technology and growth stocks.',
+    note: 'Tracked via QQQ ETF'
+  },
+  {
+    symbol: 'IWM',
+    name: 'Russell 2000',
+    label: 'RUT',
+    description: 'Tracks 2,000 small-cap U.S. companies. A key gauge of domestic economic health and risk appetite.',
+    note: 'Tracked via IWM ETF'
+  },
+  {
+    symbol: 'VIXY',
+    name: 'Volatility Index',
+    label: 'VIX',
+    description: 'Tracks market volatility expectations via short-term VIX futures. Often called the "fear index" — rises when markets fall.',
+    note: 'Tracked via VIXY ETF'
   }
 ];
 
@@ -1039,7 +1282,7 @@ async function fetchAllStocks() {
   grid.innerHTML = STOCKS.map(renderStockSkeleton).join('');
 
   // Fetch in batches of 3 to respect rate limits (30 calls/sec free tier)
-  const batchSize = 3;
+  const batchSize = 5;
   for (let i = 0; i < STOCKS.length; i += batchSize) {
     const batch = STOCKS.slice(i, i + batchSize);
     const results = await Promise.allSettled(
@@ -1081,6 +1324,9 @@ async function refreshAll() {
     await Promise.all([fetchIndicators(), fetchAllStocks()]);
     setStatus('live', 'Live');
     setTimestamp();
+    if (!document.getElementById('graphsContent').hasAttribute('hidden')) {
+      refreshAllGraphs(true).catch(console.error);
+    }
   } catch (err) {
     setStatus('error', 'Error');
     showError('Some data could not be loaded. Check your API key or try again.');
@@ -1093,19 +1339,480 @@ async function refreshAll() {
 }
 
 // =============================================
+// Graph Configuration
+// =============================================
+const TIME_RANGES = [
+  { label: '7D', days: 7, resolution: 'D' },
+  { label: '30D', days: 30, resolution: 'D' },
+  { label: '90D', days: 90, resolution: 'D' },
+  { label: '180D', days: 180, resolution: 'D' },
+  { label: '1Y', days: 365, resolution: 'D' },
+  { label: '2Y', days: 730, resolution: 'D' },
+  { label: '3Y', days: 1095, resolution: 'W' },
+  { label: '5Y', days: 1825, resolution: 'W' },
+  { label: '10Y', days: 3650, resolution: 'W' },
+];
+
+const STOCK_COLORS = [
+  '#5b9cf5', '#34d399', '#f87171', '#fbbf24', '#a78bfa',
+  '#f472b6', '#38bdf8', '#fb923c', '#4ade80', '#c084fc',
+  '#facc15', '#e879f9', '#2dd4bf', '#818cf8', '#f97316',
+  '#22d3ee', '#a3e635', '#fda4af', '#fdba74'
+];
+
+const INDICATOR_COLORS = ['#5b9cf5', '#34d399', '#f87171', '#fbbf24', '#a78bfa'];
+
+let graphDataCache = {};
+let activeStockTimeRange = '7D';
+let activeIndicatorTimeRange = '7D';
+let visibleStocks = {};
+let visibleIndicators = {};
+
+STOCKS.forEach(function(s) { visibleStocks[s.symbol] = true; });
+INDICATORS.forEach(function(ind) { visibleIndicators[ind.symbol] = true; });
+
+// =============================================
+// Graph Data Fetching
+// =============================================
+async function fetchCandleData(symbol, resolution, from, to) {
+  var data = await apiFetch('/stock/candle', { symbol: symbol, resolution: resolution, from: from, to: to });
+  if (data.s !== 'ok') return null;
+  return { c: data.c, t: data.t };
+}
+
+async function fetchAllGraphData(symbols, resolution, days, forceRefresh) {
+  var to = Math.floor(Date.now() / 1000);
+  var from = to - days * 86400;
+  var results = {};
+  var toFetch = [];
+
+  for (var i = 0; i < symbols.length; i++) {
+    var sym = symbols[i];
+    var ck = sym + '_' + resolution + '_' + days;
+    if (!forceRefresh && graphDataCache.hasOwnProperty(ck)) {
+      results[sym] = graphDataCache[ck];
+      continue;
+    }
+    toFetch.push(sym);
+  }
+
+  var batchSize = 5;
+  for (var b = 0; b < toFetch.length; b += batchSize) {
+    var batch = toFetch.slice(b, b + batchSize);
+    var batchResults = await Promise.allSettled(
+      batch.map(function(sym) { return fetchCandleData(sym, resolution, from, to); })
+    );
+
+    batchResults.forEach(function(res, j) {
+      var sym = batch[j];
+      var ck = sym + '_' + resolution + '_' + days;
+      if (res.status === 'fulfilled' && res.value) {
+        graphDataCache[ck] = res.value;
+        results[sym] = res.value;
+      } else {
+        results[sym] = null;
+        graphDataCache[ck] = null;
+      }
+    });
+
+    if (b + batchSize < toFetch.length) {
+      await new Promise(function(r) { setTimeout(r, 350); });
+    }
+  }
+
+  return results;
+}
+
+// =============================================
+// Canvas Drawing
+// =============================================
+function getGraphColors() {
+  var style = getComputedStyle(document.documentElement);
+  return {
+    bg: style.getPropertyValue('--surface').trim(),
+    grid: style.getPropertyValue('--border-subtle').trim(),
+    text: style.getPropertyValue('--text-muted').trim(),
+    textFaint: style.getPropertyValue('--text-faint').trim(),
+    accent: style.getPropertyValue('--accent').trim()
+  };
+}
+
+function drawGraph(canvas, datasets, opts) {
+  var ctx = canvas.getContext('2d');
+  var dpr = window.devicePixelRatio || 1;
+  var width = canvas.clientWidth;
+  var height = opts.height || 350;
+  if (width === 0) return;
+
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + 'px';
+  canvas.style.height = height + 'px';
+  ctx.scale(dpr, dpr);
+
+  var colors = getGraphColors();
+  var pad = { top: 16, right: 16, bottom: 38, left: 55 };
+  var pw = width - pad.left - pad.right;
+  var ph = height - pad.top - pad.bottom;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = colors.bg;
+  ctx.fillRect(0, 0, width, height);
+
+  var allPoints = [];
+  var maxIdx = 0;
+  datasets.forEach(function(ds) {
+    if (ds.visible && ds.data && ds.data.length > 0) {
+      ds.data.forEach(function(pt, i) {
+        if (pt != null && !isNaN(pt)) {
+          allPoints.push(pt);
+          if (i > maxIdx) maxIdx = i;
+        }
+      });
+    }
+  });
+
+  if (allPoints.length === 0) {
+    ctx.fillStyle = colors.text;
+    ctx.font = '13px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('No data available', width / 2, height / 2);
+    return;
+  }
+
+  var effectiveMax = maxIdx === 0 ? 1 : maxIdx;
+
+  var yMin = Math.min.apply(null, allPoints);
+  var yMax = Math.max.apply(null, allPoints);
+  var yRange = yMax - yMin || 1;
+  var yPad = yRange * 0.1;
+  var y0 = yMin - yPad;
+  var y1 = yMax + yPad;
+
+  function xPos(i) { return pad.left + (i / effectiveMax) * pw; }
+  function yPos(v) { return pad.top + ph - ((v - y0) / (y1 - y0)) * ph; }
+
+  // Grid - horizontal lines
+  var yTicks = 6;
+  ctx.strokeStyle = colors.grid;
+  ctx.lineWidth = 0.5;
+  for (var i = 0; i < yTicks; i++) {
+    var y = pad.top + (i / (yTicks - 1)) * ph;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(pad.left + pw, y);
+    ctx.stroke();
+  }
+
+  // Grid - vertical lines
+  var xTicks = Math.min(effectiveMax + 1, 8);
+  var xStep = effectiveMax / Math.max(xTicks - 1, 1);
+  for (var i = 0; i < xTicks; i++) {
+    var idx = Math.round(i * xStep);
+    var x = xPos(idx);
+    ctx.beginPath();
+    ctx.moveTo(x, pad.top);
+    ctx.lineTo(x, pad.top + ph);
+    ctx.stroke();
+  }
+
+  // Zero line for percent mode
+  if (opts.percentMode && y0 <= 0 && y1 >= 0) {
+    ctx.strokeStyle = colors.textFaint;
+    ctx.lineWidth = 1;
+    var zeroY = yPos(0);
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pad.left, zeroY);
+    ctx.lineTo(pad.left + pw, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Y-axis labels
+  ctx.fillStyle = colors.text;
+  ctx.font = '10px Inter, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (var i = 0; i < yTicks; i++) {
+    var val = y0 + i * yStep;
+    var labelY = yPos(val);
+    var label;
+    if (opts.percentMode) {
+      label = val.toFixed(1) + '%';
+    } else {
+      label = Math.abs(val) >= 1000 ? (val / 1000).toFixed(1) + 'k' : val.toFixed(1);
+    }
+    ctx.fillText(label, pad.left - 8, labelY);
+  }
+
+  // X-axis labels (dates)
+  if (opts.labels && opts.labels.length > 0) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = colors.text;
+    for (var i = 0; i < xTicks; i++) {
+      var idx2 = Math.min(Math.round(i * xStep), opts.labels.length - 1);
+      var lx = xPos(idx2);
+      ctx.fillText(opts.labels[idx2] || '', lx, pad.top + ph + 7);
+    }
+  }
+
+  // Data lines + dots
+  datasets.forEach(function(ds) {
+    if (!ds.visible || !ds.data || ds.data.length === 0) return;
+
+    var validPoints = [];
+    ds.data.forEach(function(v, i) {
+      if (v != null && !isNaN(v)) {
+        validPoints.push({ x: xPos(i), y: yPos(v), v: v });
+      }
+    });
+    if (validPoints.length === 0) return;
+
+    ctx.strokeStyle = ds.color;
+    ctx.lineWidth = 1.8;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    validPoints.forEach(function(pt, i) {
+      if (i === 0) ctx.moveTo(pt.x, pt.y);
+      else ctx.lineTo(pt.x, pt.y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = ds.color;
+    validPoints.forEach(function(pt) {
+      ctx.beginPath();
+      ctx.arc(pt.x, pt.y, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+}
+
+// =============================================
+// Legend Rendering
+// =============================================
+function renderLegend(containerId, items, visibilityMap, onChange) {
+  var container = document.getElementById(containerId);
+  var html = '';
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    var isHidden = visibilityMap[item.key] === false;
+    html += '<span class="legend-item' + (isHidden ? ' hidden' : '') + '" data-key="' + item.key + '">' +
+      '<span class="legend-dot" style="background:' + item.color + ';"></span>' + item.label + '</span>';
+  }
+  container.innerHTML = html;
+
+  container.querySelectorAll('.legend-item').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var key = el.dataset.key;
+      visibilityMap[key] = visibilityMap[key] === false;
+      onChange();
+    });
+  });
+}
+
+// =============================================
+// Time Range Buttons
+// =============================================
+function renderTimeRangeButtons(containerId, activeRange, onChange) {
+  var container = document.getElementById(containerId);
+  var html = '<div class="time-range-btns">';
+  for (var i = 0; i < TIME_RANGES.length; i++) {
+    var tr = TIME_RANGES[i];
+    html += '<button class="time-range-btn' + (tr.label === activeRange ? ' active' : '') +
+      '" data-range="' + tr.label + '">' + tr.label + '</button>';
+  }
+  html += '</div>';
+  container.innerHTML = html;
+
+  container.querySelectorAll('.time-range-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      onChange(btn.dataset.range);
+    });
+  });
+}
+
+// =============================================
+// Graph Build & Update
+// =============================================
+function getTimeRange(days) {
+  for (var i = 0; i < TIME_RANGES.length; i++) {
+    if (TIME_RANGES[i].label === days) return TIME_RANGES[i];
+  }
+  return TIME_RANGES[0];
+}
+
+function formatDateLabel(ts, resolution) {
+  var d = new Date(ts * 1000);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+async function refreshStockGraph(forceRefresh) {
+  var tr = getTimeRange(activeStockTimeRange);
+  var symbols = STOCKS.map(function(s) { return s.symbol; });
+  var loadingEl = document.getElementById('stocksGraphLoading');
+  var canvas = document.getElementById('stocksCanvas');
+
+  loadingEl.style.display = 'flex';
+  canvas.style.display = 'none';
+
+  var data = await fetchAllGraphData(symbols, tr.resolution, tr.days, forceRefresh);
+
+  loadingEl.style.display = 'none';
+  canvas.style.display = 'block';
+
+  var datasets = [];
+  var allTimestamps = [];
+
+  STOCKS.forEach(function(stock, i) {
+    var raw = data[stock.symbol];
+    if (!raw || !raw.c || raw.c.length === 0) return;
+    var firstClose = raw.c[0];
+    if (!firstClose) return;
+    var pctData = raw.c.map(function(c) { return c != null ? ((c / firstClose) - 1) * 100 : null; });
+    datasets.push({
+      key: stock.symbol,
+      label: stock.symbol,
+      color: STOCK_COLORS[i % STOCK_COLORS.length],
+      data: pctData,
+      visible: visibleStocks[stock.symbol] !== false
+    });
+    if (raw.t.length > allTimestamps.length) allTimestamps = raw.t;
+  });
+
+  var labels = allTimestamps.map(function(ts) { return formatDateLabel(ts, tr.resolution); });
+  drawGraph(canvas, datasets, { labels: labels, percentMode: true, height: 350 });
+
+  renderLegend('stocksLegend',
+    datasets.map(function(ds) { return { key: ds.key, label: ds.label, color: ds.color }; }),
+    visibleStocks,
+    function() { refreshStockGraph(false); }
+  );
+
+  renderTimeRangeButtons('stocksTimeRange', activeStockTimeRange, function(range) {
+    activeStockTimeRange = range;
+    refreshStockGraph(false);
+  });
+}
+
+async function refreshIndicatorGraph(forceRefresh) {
+  var tr = getTimeRange(activeIndicatorTimeRange);
+  var symbols = INDICATORS.map(function(ind) { return ind.symbol; });
+  var loadingEl = document.getElementById('indicatorsGraphLoading');
+  var canvas = document.getElementById('indicatorsCanvas');
+
+  loadingEl.style.display = 'flex';
+  canvas.style.display = 'none';
+
+  var data = await fetchAllGraphData(symbols, tr.resolution, tr.days, forceRefresh);
+
+  loadingEl.style.display = 'none';
+  canvas.style.display = 'block';
+
+  var datasets = [];
+  var allTimestamps = [];
+
+  INDICATORS.forEach(function(ind, i) {
+    var raw = data[ind.symbol];
+    if (!raw || !raw.c || raw.c.length === 0) return;
+    var firstClose = raw.c[0];
+    if (!firstClose) return;
+    var pctData = raw.c.map(function(c) { return c != null ? ((c / firstClose) - 1) * 100 : null; });
+    datasets.push({
+      key: ind.symbol,
+      label: ind.symbol,
+      color: INDICATOR_COLORS[i % INDICATOR_COLORS.length],
+      data: pctData,
+      visible: visibleIndicators[ind.symbol] !== false
+    });
+    if (raw.t.length > allTimestamps.length) allTimestamps = raw.t;
+  });
+
+  var labels = allTimestamps.map(function(ts) { return formatDateLabel(ts, tr.resolution); });
+  drawGraph(canvas, datasets, { labels: labels, percentMode: true, height: 350 });
+
+  renderLegend('indicatorsLegend',
+    datasets.map(function(ds) { return { key: ds.key, label: ds.label, color: ds.color }; }),
+    visibleIndicators,
+    function() { refreshIndicatorGraph(false); }
+  );
+
+  renderTimeRangeButtons('indicatorsTimeRange', activeIndicatorTimeRange, function(range) {
+    activeIndicatorTimeRange = range;
+    refreshIndicatorGraph(false);
+  });
+}
+
+async function refreshAllGraphs(forceRefresh) {
+  await refreshStockGraph(forceRefresh);
+  await refreshIndicatorGraph(forceRefresh);
+}
+
+function redrawGraphsIfVisible() {
+  if (!document.getElementById('graphsContent').hasAttribute('hidden')) {
+    refreshAllGraphs(false).catch(console.error);
+  }
+}
+
+// =============================================
+// Tab Switching
+// =============================================
+(function initTabs() {
+  var tabBar = document.getElementById('tabBar');
+  var dashboardContent = document.getElementById('dashboardContent');
+  var graphsContent = document.getElementById('graphsContent');
+  var graphsLoaded = false;
+
+  tabBar.addEventListener('click', function(e) {
+    var tab = e.target.closest('.tab');
+    if (!tab) return;
+    var tabName = tab.dataset.tab;
+
+    tabBar.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+    tab.classList.add('active');
+
+    if (tabName === 'dashboard') {
+      dashboardContent.removeAttribute('hidden');
+      graphsContent.setAttribute('hidden', '');
+    } else {
+      dashboardContent.setAttribute('hidden', '');
+      graphsContent.removeAttribute('hidden');
+      if (!graphsLoaded) {
+        graphsLoaded = true;
+        refreshAllGraphs(true);
+      }
+    }
+  });
+})();
+
+// =============================================
+// Canvas Resize Handler
+// =============================================
+var resizeTimeout;
+window.addEventListener('resize', function() {
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(function() {
+    redrawGraphsIfVisible();
+  }, 250);
+});
+
+// =============================================
 // Theme Toggle
 // =============================================
 (function() {
-  const toggle = document.getElementById('themeToggle');
-  const root = document.documentElement;
-  let theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  var toggle = document.getElementById('themeToggle');
+  var root = document.documentElement;
+  var theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   root.setAttribute('data-theme', theme);
   updateToggleIcon();
 
-  toggle.addEventListener('click', () => {
+  toggle.addEventListener('click', function() {
     theme = theme === 'dark' ? 'light' : 'dark';
     root.setAttribute('data-theme', theme);
     updateToggleIcon();
+    redrawGraphsIfVisible();
   });
 
   function updateToggleIcon() {

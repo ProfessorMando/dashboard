@@ -1,32 +1,47 @@
 # Dashboard
 
-A static market dashboard served by a Cloudflare Worker. The Worker also proxies the market-data APIs so credentials remain in Cloudflare bindings rather than browser code.
+A static market dashboard served by a Cloudflare Worker. Scheduled Worker jobs collect Finnhub and Alpha Vantage data into D1; browser requests read aggregate snapshots from D1 and never call either provider synchronously.
 
 ## Required production bindings
 
-The production Worker that serves the dashboard domain must have both of these encrypted secrets:
+The Worker requires:
 
-- `FINNHUB_API_KEY` — required for Finnhub quote, profile, metric, and news requests.
-- `ALPHA_VANTAGE_API_KEY` — required for Alpha Vantage historical candle data.
+- `DB` — a D1 database containing current snapshots, refresh locks, provider status, and normalized historical closing prices.
+- `FINNHUB_API_KEY` — an encrypted secret used by scheduled quote, profile, metric, and news refreshes.
+- `ALPHA_VANTAGE_API_KEY` — an encrypted secret used by the scheduled historical-price refresh.
 
-Set the secrets against the exact Worker and environment used by the production dashboard, then deploy that same environment. For the Worker named in `wrangler.toml`, with no named Wrangler environment, use:
+Create the D1 database, copy its ID into `wrangler.toml`, apply the migrations, set the secrets, and deploy:
 
 ```sh
+npx wrangler d1 create dashboard-market-data
+# Replace REPLACE_WITH_D1_DATABASE_ID in wrangler.toml with the returned database ID.
+npx wrangler d1 migrations apply dashboard-market-data --remote
 npx wrangler secret put FINNHUB_API_KEY
 npx wrangler secret put ALPHA_VANTAGE_API_KEY
-npx wrangler secret list
 npx wrangler deploy
 ```
 
-If production uses a named environment, add the same `--env <environment>` option to every command above. Before deployment, confirm in Cloudflare that the dashboard domain's Worker route or custom domain targets that exact Worker/environment; secrets attached only to a preview deployment or another Worker are not available to production traffic.
+For local development, apply the migration without `--remote`:
 
-After deployment, request `https://<dashboard-domain>/api/health`. A correctly configured production response is:
-
-```json
-{
-  "finnhubConfigured": true,
-  "alphaVantageConfigured": true
-}
+```sh
+npx wrangler d1 migrations apply dashboard-market-data --local
+npx wrangler dev --test-scheduled
 ```
 
-The health endpoint reports only whether each binding is available. It never returns either credential.
+The configured Cron Triggers refresh data at different cadences:
+
+- Quotes: every 5 minutes.
+- Company news: twice an hour.
+- Company metrics: hourly.
+- Company profiles: daily.
+- Historical daily closes: daily.
+
+Refresh jobs use both in-isolate single-flight coalescing and a D1 lease, preventing overlapping scheduled executions from duplicating provider work. Failed refreshes retain the last valid values while recording the failed provider check separately.
+
+## Read endpoints
+
+- `GET /api/dashboard` returns all indicator quotes and stock-card quote, profile, metric, and news data.
+- `GET /api/historical?days=365` returns every stored graph series for the requested lookback, up to 10 years.
+- `GET /api/health` reports whether the D1 and provider bindings are configured without exposing credentials.
+
+Aggregate responses include `updatedAt`, `stale`, and `providerStatus`. The API reads storage only; stale reads do not trigger provider requests.

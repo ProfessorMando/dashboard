@@ -1184,70 +1184,69 @@ function showError(msg) {
   setTimeout(() => { banner.style.display = 'none'; }, 12000);
 }
 
-function setTimestamp() {
+function setTimestamp(updatedAt, stale) {
   const pill = document.getElementById('timestampPill');
   const ts = document.getElementById('lastUpdated');
-  const now = new Date();
-  ts.textContent = 'Updated ' + now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const date = updatedAt ? new Date(updatedAt) : null;
+  ts.textContent = date && !isNaN(date.getTime())
+    ? (stale ? 'Stale data from ' : 'Updated ') + date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    : 'No stored data';
   pill.style.display = '';
+}
+
+let dashboardRequest = null;
+let latestDashboard = null;
+
+function fetchDashboardData(forceReload) {
+  if (forceReload) dashboardRequest = null;
+  if (!dashboardRequest) {
+    dashboardRequest = apiFetch('/dashboard').then(function(data) {
+      latestDashboard = data;
+      return data;
+    }).catch(function(error) {
+      dashboardRequest = null;
+      throw error;
+    });
+  }
+  return dashboardRequest;
 }
 
 async function fetchIndicators() {
   const grid = document.getElementById('indicatorsGrid');
   grid.innerHTML = INDICATORS.map(renderIndicatorSkeleton).join('');
+  const dashboard = await fetchDashboardData(false);
 
-  const results = await Promise.allSettled(
-    INDICATORS.map(ind => apiFetch('/quote', { symbol: ind.symbol }))
-  );
-
-  results.forEach((res, i) => {
-    const ind = INDICATORS[i];
-    const el = document.getElementById(`indicator-${ind.symbol}`);
-    if (res.status === 'fulfilled') {
-      el.outerHTML = renderIndicator(ind, res.value);
+  INDICATORS.forEach(function(ind) {
+    const el = document.getElementById('indicator-' + ind.symbol);
+    const quote = dashboard.indicators[ind.symbol];
+    if (quote) {
+      el.outerHTML = renderIndicator(ind, quote);
     } else {
       el.querySelector('.skeleton-price').outerHTML =
-        '<div style="color:var(--text-faint);font-size:var(--text-sm)">Failed to load</div>';
+        '<div style="color:var(--text-faint);font-size:var(--text-sm)">No stored data</div>';
     }
   });
-}
-
-async function fetchStockData(stock) {
-  const today = todayStr();
-  const weekAgo = weekAgoStr();
-
-  const [quote, profile, metrics, news] = await Promise.allSettled([
-    apiFetch('/quote', { symbol: stock.symbol }),
-    apiFetch('/stock/profile2', { symbol: stock.symbol }),
-    apiFetch('/stock/metric', { symbol: stock.symbol, metric: 'all' }),
-    apiFetch('/company-news', { symbol: stock.symbol, from: weekAgo, to: today })
-  ]);
-
-  return {
-    quote: quote.status === 'fulfilled' ? quote.value : null,
-    profile: profile.status === 'fulfilled' ? profile.value : null,
-    metrics: metrics.status === 'fulfilled' ? metrics.value : null,
-    news: news.status === 'fulfilled' ? news.value : null
-  };
 }
 
 async function fetchAllStocks() {
   const grid = document.getElementById('stocksGrid');
   grid.innerHTML = STOCKS.map(renderStockSkeleton).join('');
+  const dashboard = await fetchDashboardData(false);
 
-  const results = await Promise.allSettled(
-    STOCKS.map(function(s) { return fetchStockData(s); })
-  );
-
-  results.forEach(function(res, j) {
-    const stock = STOCKS[j];
+  STOCKS.forEach(function(stock) {
     const el = document.getElementById('stock-' + stock.symbol);
-    if (res.status === 'fulfilled' && res.value.quote) {
-      var d = res.value;
-      el.outerHTML = renderStockCard(stock, d.quote, d.profile, d.metrics, d.news);
+    const quote = dashboard.stocks.quotes[stock.symbol];
+    if (quote) {
+      el.outerHTML = renderStockCard(
+        stock,
+        quote,
+        dashboard.stocks.profiles[stock.symbol],
+        dashboard.stocks.metrics[stock.symbol],
+        dashboard.stocks.news[stock.symbol]
+      );
     } else {
       el.querySelector('.card-price').innerHTML =
-        '<div style="color:var(--red);font-size:var(--text-sm)">Failed to load data</div>';
+        '<div style="color:var(--red);font-size:var(--text-sm)">No stored data</div>';
     }
   });
 }
@@ -1261,18 +1260,19 @@ async function refreshAll() {
   btn.disabled = true;
   document.getElementById('errorBanner').style.display = 'none';
 
-  setStatus('loading', 'Fetching live data...');
+  setStatus('loading', 'Loading stored data...');
 
   try {
+    fetchDashboardData(true);
     await Promise.all([fetchIndicators(), fetchAllStocks()]);
-    setStatus('live', 'Live');
-    setTimestamp();
+    setStatus(latestDashboard.stale ? 'error' : 'live', latestDashboard.stale ? 'Stale' : 'Live');
+    setTimestamp(latestDashboard.updatedAt, latestDashboard.stale);
     if (!document.getElementById('graphsContent').hasAttribute('hidden')) {
       refreshAllGraphs(false).catch(console.error);
     }
   } catch (err) {
     setStatus('error', 'Error');
-    showError('Some data could not be loaded. Check your API key or try again.');
+    showError('Stored market data could not be loaded. Try again after the next scheduled refresh.');
     console.error(err);
   } finally {
     isLoading = false;
@@ -1317,45 +1317,29 @@ INDICATORS.forEach(function(ind) { visibleIndicators[ind.symbol] = true; });
 // =============================================
 // Graph Data Fetching
 // =============================================
-async function fetchCandleData(symbol, resolution, from, to) {
-  var data = await apiFetch('/stock/candle', { symbol: symbol, resolution: resolution, from: from, to: to });
-  if (data.s !== 'ok') return null;
-  return { c: data.c, t: data.t };
+let historicalRequests = {};
+
+function fetchHistoricalData(days, forceReload) {
+  if (forceReload) delete historicalRequests[days];
+  if (!historicalRequests[days]) {
+    historicalRequests[days] = apiFetch('/historical', { days: days }).catch(function(error) {
+      delete historicalRequests[days];
+      throw error;
+    });
+  }
+  return historicalRequests[days];
 }
 
 async function fetchAllGraphData(symbols, resolution, days, forceRefresh) {
-  var to = Math.floor(Date.now() / 1000);
-  var from = to - days * 86400;
+  var response = await fetchHistoricalData(days, forceRefresh);
   var results = {};
-  var toFetch = [];
 
-  for (var i = 0; i < symbols.length; i++) {
-    var sym = symbols[i];
-    var ck = sym + '_' + resolution + '_' + days;
-    if (!forceRefresh && graphDataCache.hasOwnProperty(ck)) {
-      results[sym] = graphDataCache[ck];
-      continue;
-    }
-    toFetch.push(sym);
-  }
-
-  if (toFetch.length > 0) {
-    var batchResults = await Promise.allSettled(
-      toFetch.map(function(sym) { return fetchCandleData(sym, resolution, from, to); })
-    );
-
-    batchResults.forEach(function(res, j) {
-      var sym = toFetch[j];
-      var ck = sym + '_' + resolution + '_' + days;
-      if (res.status === 'fulfilled' && res.value) {
-        graphDataCache[ck] = res.value;
-        results[sym] = res.value;
-      } else {
-        results[sym] = null;
-        graphDataCache[ck] = null;
-      }
-    });
-  }
+  symbols.forEach(function(symbol) {
+    var ck = symbol + '_' + resolution + '_' + days;
+    var series = response.series[symbol] || null;
+    graphDataCache[ck] = series;
+    results[symbol] = series;
+  });
 
   return results;
 }

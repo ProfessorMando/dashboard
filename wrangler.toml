@@ -3,4 +3,19 @@ main = "worker/index.js"
 compatibility_date = "2026-03-24"
 
 [assets]
-directory = "./"
+directory = "./public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dashboard-market-data"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+[triggers]
+crons = [
+  "*/5 * * * *",
+  "7,37 * * * *",
+  "12 * * * *",
+  "22 3 * * *",
+  "42 3 * * *"
+]

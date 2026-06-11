@@ -16,45 +16,24 @@ function getTTL(endpoint) {
 }
 
 // =============================================
-// Rate Limiter — token bucket, 1 req/sec, burst 5
+// Rate Limiter — serializes API calls at 1 req/sec
 // =============================================
 class RateLimiter {
-  constructor(burst, refillPerSec) {
-    this.burst = burst;
-    this.refillPerSec = refillPerSec;
-    this.tokens = burst;
-    this.lastRefill = Date.now();
-    this.queue = [];
+  constructor(maxPerSec) {
+    this.delay = 1000 / maxPerSec;
+    this.nextTime = 0;
   }
 
-  refill() {
+  async acquire() {
     const now = Date.now();
-    const elapsed = (now - this.lastRefill) / 1000;
-    this.tokens = Math.min(this.burst, this.tokens + elapsed * this.refillPerSec);
-    this.lastRefill = now;
-  }
-
-  drain() {
-    while (this.queue.length > 0 && this.tokens >= 1) {
-      this.tokens -= 1;
-      this.queue.shift()();
+    if (now < this.nextTime) {
+      await new Promise(function (r) { setTimeout(r, this.nextTime - now); }.bind(this));
     }
-  }
-
-  acquire() {
-    this.refill();
-    this.drain();
-    if (this.tokens >= 1) {
-      this.tokens -= 1;
-      return Promise.resolve();
-    }
-    return new Promise(function (resolve) {
-      this.queue.push(resolve);
-    }.bind(this));
+    this.nextTime = Math.max(now, this.nextTime) + this.delay;
   }
 }
 
-const limiter = new RateLimiter(5, 1);
+const limiter = new RateLimiter(1);
 
 async function fetchWithRateLimit(url) {
   await limiter.acquire();
@@ -62,18 +41,18 @@ async function fetchWithRateLimit(url) {
 }
 
 // =============================================
-// Finnhub proxy (existing, now with rate limiter)
+// Finnhub proxy
 // =============================================
 async function handleFinnhub(endpoint, searchParams, env, ctx) {
   const params = new URLSearchParams(searchParams);
   params.set('token', env.FINNHUB_API_KEY);
-  const url = `${FINNHUB_BASE}${endpoint}?${params.toString()}`;
+  const url = FINNHUB_BASE + endpoint + '?' + params.toString();
 
   const cacheKey = new Request(url);
   const cache = caches.default;
 
-  let response = await cache.match(cacheKey);
-  let cacheHit = true;
+  var response = await cache.match(cacheKey);
+  var cacheHit = true;
 
   if (!response) {
     cacheHit = false;
@@ -81,12 +60,12 @@ async function handleFinnhub(endpoint, searchParams, env, ctx) {
 
     const ttl = getTTL(endpoint);
     const headers = new Headers(response.headers);
-    headers.set('Cache-Control', `public, max-age=${ttl}`);
+    headers.set('Cache-Control', 'public, max-age=' + ttl);
 
     const cached = new Response(response.clone().body, {
       status: response.status,
       statusText: response.statusText,
-      headers,
+      headers: headers,
     });
 
     ctx.waitUntil(cache.put(cacheKey, cached));
@@ -119,7 +98,10 @@ function transformAVData(raw, from, to) {
   const fromDay = floorDay(from);
   const toDay = floorDay(to);
 
-  const seriesKey = Object.keys(raw).find(function (k) { return k.startsWith('Time Series'); });
+  var seriesKey = null;
+  Object.keys(raw).forEach(function (k) {
+    if (k.startsWith('Time Series')) seriesKey = k;
+  });
   if (!seriesKey) return null;
 
   const series = raw[seriesKey];
@@ -137,11 +119,14 @@ function transformAVData(raw, from, to) {
 
   entries.sort(function (a, b) { return a.t - b.t; });
 
-  return {
-    s: 'ok',
-    c: entries.map(function (e) { return e.c; }),
-    t: entries.map(function (e) { return e.t; }),
-  };
+  var cArr = [];
+  var tArr = [];
+  for (var i = 0; i < entries.length; i++) {
+    cArr.push(entries[i].c);
+    tArr.push(entries[i].t);
+  }
+
+  return { s: 'ok', c: cArr, t: tArr };
 }
 
 async function handleCandle(symbol, from, to, env, ctx) {
@@ -152,15 +137,14 @@ async function handleCandle(symbol, from, to, env, ctx) {
     });
   }
 
-  const cacheKey = new Request(`https://av-cache.internal/${symbol}`);
+  const cacheKey = new Request('https://av-cache.internal/' + symbol);
   const cache = caches.default;
 
-  let cached = await cache.match(cacheKey);
-  let fullData = null;
+  var fullData = null;
+  var cached = await cache.match(cacheKey);
 
   if (cached) {
-    const text = await cached.text();
-    try { fullData = JSON.parse(text); } catch (e) { /* fall through */ }
+    try { fullData = await cached.json(); } catch (e) { /* stale, refetch */ }
   }
 
   if (!fullData) {
@@ -169,7 +153,7 @@ async function handleCandle(symbol, from, to, env, ctx) {
     params.set('symbol', symbol);
     params.set('outputsize', 'compact');
     params.set('apikey', env.ALPHA_VANTAGE_API_KEY);
-    const avUrl = `${AV_BASE}?${params.toString()}`;
+    const avUrl = AV_BASE + '?' + params.toString();
 
     const response = await fetchWithRateLimit(avUrl);
     const raw = await response.json();
@@ -203,7 +187,7 @@ async function handleCandle(symbol, from, to, env, ctx) {
 }
 
 // =============================================
-// Main request handler
+// Route dispatch
 // =============================================
 async function handleAPI(request, env, ctx) {
   const url = new URL(request.url);
@@ -225,7 +209,6 @@ async function handleAPI(request, env, ctx) {
 
   const endpoint = url.pathname.replace(/^\/api/, '');
 
-  // Route /stock/candle to Alpha Vantage
   if (endpoint === '/stock/candle') {
     const from = parseInt(url.searchParams.get('from'), 10);
     const to = parseInt(url.searchParams.get('to'), 10);
@@ -240,7 +223,6 @@ async function handleAPI(request, env, ctx) {
     return handleCandle(url.searchParams.get('symbol'), from, to, env, ctx);
   }
 
-  // Everything else → Finnhub
   if (!env.FINNHUB_API_KEY) {
     return new Response('Server misconfigured: missing FINNHUB_API_KEY secret', { status: 500 });
   }
@@ -248,12 +230,26 @@ async function handleAPI(request, env, ctx) {
   return handleFinnhub(endpoint, url.search, env, ctx);
 }
 
+// =============================================
+// Main entry point
+// =============================================
+function jsonError(status, message) {
+  return new Response(JSON.stringify({ error: message }), {
+    status: status,
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith('/api/')) {
-      return handleAPI(request, env, ctx);
+      try {
+        return await handleAPI(request, env, ctx);
+      } catch (e) {
+        return jsonError(502, e.message || 'Internal error');
+      }
     }
 
     return env.ASSETS.fetch(request);

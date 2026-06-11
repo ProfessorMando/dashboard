@@ -17,6 +17,8 @@ import {
 } from './storage.js';
 
 const localFlights = new Map();
+export const REFRESH_JOB_ORDER = Object.freeze(['quotes', 'profiles', 'metrics', 'news', 'historical']);
+
 const JOB_SETTINGS = {
   quotes: { provider: 'finnhub', concurrency: 4 },
   profiles: { provider: 'finnhub', concurrency: 3 },
@@ -311,6 +313,42 @@ const REFRESHERS = {
   news: refreshNews,
   historical: refreshHistorical,
 };
+
+const JOB_RECORD_TYPES = Object.freeze({
+  quotes: SNAPSHOT_KEYS.quotes,
+  profiles: SNAPSHOT_KEYS.profiles,
+  metrics: SNAPSHOT_KEYS.metrics,
+  news: SNAPSHOT_KEYS.news,
+  historical: 'historical',
+});
+
+export async function findUninitializedRefreshJobs(env, excludedJobs) {
+  const excluded = new Set(excludedJobs || []);
+  const candidates = REFRESH_JOB_ORDER.filter(function (job) { return !excluded.has(job); });
+  const records = await Promise.all(candidates.map(function (job) {
+    return getMarketRecords(env.DB, JOB_RECORD_TYPES[job]);
+  }));
+
+  return candidates.filter(function (job, index) {
+    return Object.keys(records[index]).length === 0;
+  });
+}
+
+export async function runScheduledRefreshCycle(env, scheduledJobs) {
+  const planned = Array.from(new Set(scheduledJobs || []));
+  const results = [];
+
+  for (const job of planned) {
+    results.push({ job: job, result: await runRefreshJob(env, job) });
+  }
+
+  const bootstrapJobs = await findUninitializedRefreshJobs(env, planned);
+  for (const job of bootstrapJobs) {
+    results.push({ job: job, bootstrap: true, result: await runRefreshJob(env, job) });
+  }
+
+  return results;
+}
 
 export function runRefreshJob(env, job) {
   if (localFlights.has(job)) return localFlights.get(job);

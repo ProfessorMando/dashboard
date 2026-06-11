@@ -10,7 +10,7 @@ import {
   instrumentsSupporting,
   stocksSupporting,
 } from './config.js';
-import { runRefreshJob } from './refresh.js';
+import { runScheduledRefreshCycle } from './refresh.js';
 import { getHistoricalSeries, getMarketRecords, historicalStorageKey } from './storage.js';
 
 const JSON_HEADERS = {
@@ -390,10 +390,8 @@ export default {
 
   async scheduled(controller, env, ctx) {
     const jobs = CRON_JOBS[controller.cron] || [];
-    for (const job of jobs) {
-      ctx.waitUntil(runRefreshJob(env, job).catch(function (error) {
-        console.error('Scheduled refresh failed', job, error);
-      }));
-    }
+    ctx.waitUntil(runScheduledRefreshCycle(env, jobs).catch(function (error) {
+      console.error('Scheduled refresh cycle failed', controller.cron, error);
+    }));
   },
 };

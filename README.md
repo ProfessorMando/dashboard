@@ -10,23 +10,26 @@ The Worker requires:
 - `FINNHUB_API_KEY` — an encrypted secret used by scheduled quote, profile, metric, and news refreshes.
 - `ALPHA_VANTAGE_API_KEY` — an encrypted secret used by the scheduled historical-price refresh.
 
-Create the D1 database, copy its ID into `wrangler.toml`, apply the migrations, set the secrets, and deploy:
+The checked-in `wrangler.toml` uses Wrangler automatic provisioning for the `DB` binding so Cloudflare Builds can perform the first deployment without an account-specific database UUID in the repository. After that first deployment, find the provisioned D1 database name in the Worker bindings, apply the migrations to it, set the secrets, and deploy again:
 
 ```sh
-npx wrangler d1 create dashboard-market-data
-# Replace REPLACE_WITH_D1_DATABASE_ID in wrangler.toml with the returned database ID.
-npx wrangler d1 migrations apply dashboard-market-data --remote
+npx wrangler deploy
+npx wrangler d1 migrations apply <provisioned-database-name> --remote
 npx wrangler secret put FINNHUB_API_KEY
 npx wrangler secret put ALPHA_VANTAGE_API_KEY
 npx wrangler deploy
 ```
 
+To bind an existing D1 database instead, replace the automatic binding in `wrangler.toml` with the `database_name` and `database_id` reported by `npx wrangler d1 list`. Never commit a placeholder database ID: Wrangler validates the field as a real D1 UUID during deployment.
+
 For local development, apply the migration without `--remote`:
 
 ```sh
-npx wrangler d1 migrations apply dashboard-market-data --local
+npx wrangler d1 migrations apply DB --local
 npx wrangler dev --test-scheduled
 ```
+
+On every scheduled invocation, the Worker also initializes any dataset that has no D1 records yet. This makes a newly provisioned database populate promptly; once records exist, the normal cadences below apply and the bootstrap pass does not repeat that dataset.
 
 The configured Cron Triggers refresh data at different cadences:
 

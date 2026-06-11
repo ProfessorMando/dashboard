@@ -334,6 +334,29 @@ button { cursor: pointer; background: none; border: none; font: inherit; color: 
 
 .stock-card:hover { border-color: var(--border); }
 
+.stock-card.unavailable {
+  border-style: dashed;
+}
+
+.data-unavailable {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5) 0;
+  color: var(--text-muted);
+}
+
+.data-unavailable-title {
+  color: var(--text);
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.data-unavailable-detail {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
 /* Card header */
 .card-header {
   display: flex;
@@ -1102,6 +1125,27 @@ function renderStockSkeleton(stock) {
   `;
 }
 
+function renderStockUnavailable(stock, instrument) {
+  const detail = instrument?.unavailableReason || 'This instrument is not supported by the configured data providers.';
+  return `
+    <div class="stock-card unavailable" id="stock-${stock.symbol}">
+      <div class="card-header">
+        <div class="card-identity">
+          <div class="card-logo"><span class="card-logo-fallback">${stock.symbol.substring(0, 2)}</span></div>
+          <div class="card-title">
+            <div class="card-symbol">${stock.symbol}</div>
+            <div class="card-name">${instrument?.name || stock.name}</div>
+          </div>
+        </div>
+      </div>
+      <div class="data-unavailable">
+        <div class="data-unavailable-title">Data unavailable</div>
+        <div class="data-unavailable-detail">${detail}</div>
+      </div>
+    </div>
+  `;
+}
+
 function renderStockCard(stock, quote, profile, metrics, news) {
   const isUp = quote.d >= 0;
   const peRatio = metrics?.metric?.peTTM;
@@ -1203,6 +1247,21 @@ function setTimestamp(updatedAt, stale) {
 let dashboardRequest = null;
 let latestDashboard = null;
 
+function instrumentMetadata(symbol) {
+  return latestDashboard?.instruments?.[symbol] || null;
+}
+
+function supportsCapability(symbol, capability) {
+  const instrument = instrumentMetadata(symbol);
+  return !instrument || instrument.support?.[capability] !== false;
+}
+
+function supportedSymbols(items, capability) {
+  return items.map(function(item) { return item.symbol; }).filter(function(symbol) {
+    return supportsCapability(symbol, capability);
+  });
+}
+
 function fetchDashboardData(forceReload) {
   if (forceReload) dashboardRequest = null;
   if (!dashboardRequest) {
@@ -1225,7 +1284,11 @@ async function fetchIndicators() {
   INDICATORS.forEach(function(ind) {
     const el = document.getElementById('indicator-' + ind.symbol);
     const quote = dashboard.indicators[ind.symbol];
-    if (quote) {
+    const instrument = dashboard.instruments?.[ind.symbol];
+    if (instrument?.support?.quote === false) {
+      el.querySelector('.skeleton-price').outerHTML =
+        '<div style="color:var(--text-faint);font-size:var(--text-sm)">Data unavailable</div>';
+    } else if (quote) {
       el.outerHTML = renderIndicator(ind, quote);
     } else {
       el.querySelector('.skeleton-price').outerHTML =
@@ -1242,7 +1305,10 @@ async function fetchAllStocks() {
   STOCKS.forEach(function(stock) {
     const el = document.getElementById('stock-' + stock.symbol);
     const quote = dashboard.stocks.quotes[stock.symbol];
-    if (quote) {
+    const instrument = dashboard.instruments?.[stock.symbol];
+    if (instrument?.support?.quote === false) {
+      el.outerHTML = renderStockUnavailable(stock, instrument);
+    } else if (quote) {
       el.outerHTML = renderStockCard(
         stock,
         quote,
@@ -1629,7 +1695,7 @@ function formatDateLabel(ts, resolution) {
 
 async function refreshStockGraph(forceRefresh, prefetchedData) {
   var tr = getTimeRange(activeStockTimeRange);
-  var symbols = STOCKS.map(function(s) { return s.symbol; });
+  var symbols = supportedSymbols(STOCKS, 'historical');
   var loadingEl = document.getElementById('stocksGraphLoading');
   var canvas = document.getElementById('stocksCanvas');
 
@@ -1687,7 +1753,7 @@ async function refreshStockGraph(forceRefresh, prefetchedData) {
 
 async function refreshIndicatorGraph(forceRefresh, prefetchedData) {
   var tr = getTimeRange(activeIndicatorTimeRange);
-  var symbols = INDICATORS.map(function(ind) { return ind.symbol; });
+  var symbols = supportedSymbols(INDICATORS, 'historical');
   var loadingEl = document.getElementById('indicatorsGraphLoading');
   var canvas = document.getElementById('indicatorsCanvas');
 
@@ -1748,12 +1814,12 @@ async function refreshAllGraphs(forceRefresh) {
   var indicatorRange = getTimeRange(activeIndicatorTimeRange);
   var requests = [
     {
-      symbols: STOCKS.map(function(stock) { return stock.symbol; }),
+      symbols: supportedSymbols(STOCKS, 'historical'),
       resolution: stockRange.resolution,
       days: stockRange.days
     },
     {
-      symbols: INDICATORS.map(function(indicator) { return indicator.symbol; }),
+      symbols: supportedSymbols(INDICATORS, 'historical'),
       resolution: indicatorRange.resolution,
       days: indicatorRange.days
     }

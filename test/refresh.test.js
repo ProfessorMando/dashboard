@@ -500,3 +500,142 @@ test('graph refresh uses one aggregate historical request and expires failed cac
   assert.match(source, /requests: JSON\.stringify\(requests\)/);
   assert.match(source, /expiresAt: Date\.now\(\) \+ GRAPH_FAILURE_CACHE_MS/);
 });
+
+test('configured instruments expose provider symbols for every supported capability', async function () {
+  const { INSTRUMENTS, instrumentBySymbol } = await import('../worker/config.js');
+  const providerForCapability = {
+    quote: 'finnhub',
+    profile: 'finnhub',
+    metrics: 'finnhub',
+    news: 'finnhub',
+    historical: 'alphaVantage',
+  };
+
+  for (const instrument of INSTRUMENTS) {
+    for (const entry of Object.entries(providerForCapability)) {
+      const capability = entry[0];
+      const provider = entry[1];
+      if (instrument.support[capability]) {
+        assert.equal(typeof instrument.providerSymbols[provider], 'string');
+        assert.ok(instrument.providerSymbols[provider].length > 0);
+      }
+    }
+  }
+
+  const privateCompany = instrumentBySymbol('SPCX');
+  assert.equal(privateCompany.type, 'private_company');
+  assert.deepEqual(Object.values(privateCompany.support), [false, false, false, false, false]);
+  assert.equal(privateCompany.providerSymbols.finnhub, null);
+  assert.equal(privateCompany.providerSymbols.alphaVantage, null);
+});
+
+test('dashboard snapshot includes intentional per-instrument support status', async function () {
+  const db = {
+    prepare(sql) {
+      assert.match(sql, /FROM market_records/);
+      return {
+        bind() {
+          return {
+            async all() {
+              return {
+                results: [{
+                  symbol: 'SPCX',
+                  data: null,
+                  updated_at: null,
+                  checked_at: '2026-06-11T00:00:00.000Z',
+                  provider_status: JSON.stringify({
+                    provider: 'finnhub',
+                    ok: false,
+                    code: 'upstream_unavailable',
+                    downstreamStatus: 503,
+                  }),
+                }],
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request('https://dashboard.example/api/dashboard'),
+    { DB: db }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.instruments.AAPL.support.quote, true);
+  assert.equal(body.instruments.AAPL.providerSymbols.finnhub, 'AAPL');
+  assert.equal(body.instruments.SPCX.support.quote, false);
+  assert.equal(body.instruments.SPCX.support.historical, false);
+  assert.match(body.instruments.SPCX.unavailableReason, /private company/);
+});
+
+test('historical API returns intentional unavailability without reading price rows', async function () {
+  const statements = [];
+  const db = {
+    prepare(sql) {
+      statements.push(sql);
+      return {
+        bind() {
+          return { async all() { return { results: [] }; } };
+        },
+      };
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request('https://dashboard.example/api/historical?symbols=SPCX&days=365&resolution=D'),
+    { DB: db }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.s, 'no_data');
+  assert.equal(body.reason, 'unsupported_instruments');
+  assert.equal(body.stale, false);
+  assert.equal(body.errors.SPCX.code, 'unsupported_instrument');
+  assert.equal(body.errors.SPCX.message, 'Data unavailable');
+  assert.equal(body.errors.SPCX.intentional, true);
+  assert.equal(statements.some(function (sql) { return /historical_series_prices/.test(sql); }), false);
+});
+
+test('quote refresh suppresses provider requests for intentionally unsupported instruments', async function (context) {
+  const originalFetch = globalThis.fetch;
+  context.after(function () { globalThis.fetch = originalFetch; });
+  const requestedSymbols = [];
+  globalThis.fetch = async function (url) {
+    requestedSymbols.push(new URL(url).searchParams.get('symbol'));
+    return new Response(JSON.stringify({ c: 100, d: 1, dp: 1, t: 1700000000 }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  const writes = [];
+  const db = {
+    prepare(sql) {
+      return {
+        bind(...values) {
+          if (/FROM market_records/.test(sql)) {
+            return { async all() { return { results: [] }; } };
+          }
+          if (/FROM provider_backoff/.test(sql)) {
+            return { async first() { return null; } };
+          }
+          return { sql: sql, values: values };
+        },
+      };
+    },
+    async batch(statements) {
+      writes.push(...statements);
+    },
+  };
+
+  const result = await refreshQuotes({ DB: db, FINNHUB_API_KEY: 'secret' });
+
+  assert.equal(requestedSymbols.includes('SPCX'), false);
+  assert.equal(writes.some(function (statement) { return statement.values[1] === 'SPCX'; }), false);
+  assert.equal(result.total, requestedSymbols.length);
+  assert.equal(result.successful, result.total);
+});

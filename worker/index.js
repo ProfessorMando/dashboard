@@ -1,4 +1,15 @@
-import { ALL_SYMBOLS, CRON_JOBS, HISTORICAL_SERIES, INDICATORS, MAX_AGE_SECONDS, SNAPSHOT_KEYS, STOCKS } from './config.js';
+import {
+  ALL_SYMBOLS,
+  CRON_JOBS,
+  HISTORICAL_SERIES,
+  INDICATOR_SYMBOLS,
+  MAX_AGE_SECONDS,
+  SNAPSHOT_KEYS,
+  instrumentBySymbol,
+  instrumentSupportSnapshot,
+  instrumentsSupporting,
+  stocksSupporting,
+} from './config.js';
 import { runRefreshJob } from './refresh.js';
 import { getHistoricalSeries, getMarketRecords, historicalStorageKey } from './storage.js';
 
@@ -41,8 +52,8 @@ function summarizeRecords(records, symbols, maxAgeSeconds) {
 }
 
 function storedProviderFailure(recordGroups, requireMissingData) {
-  const failures = recordGroups.flatMap(function (records) {
-    return Object.values(records).filter(function (record) {
+  const failures = recordGroups.flatMap(function (group) {
+    return group.symbols.map(function (symbol) { return group.records[symbol]; }).filter(function (record) {
       return record && (!requireMissingData || record.data === null) && record.providerStatus
         && record.providerStatus.ok === false;
     }).map(function (record) { return record.providerStatus; });
@@ -75,16 +86,25 @@ async function handleDashboard(env) {
     getMarketRecords(env.DB, SNAPSHOT_KEYS.metrics),
     getMarketRecords(env.DB, SNAPSHOT_KEYS.news),
   ]);
-  const quotes = summarizeRecords(entries[0], ALL_SYMBOLS, MAX_AGE_SECONDS.quotes);
-  const profiles = summarizeRecords(entries[1], STOCKS, MAX_AGE_SECONDS.profiles);
-  const metrics = summarizeRecords(entries[2], STOCKS, MAX_AGE_SECONDS.metrics);
-  const news = summarizeRecords(entries[3], STOCKS, MAX_AGE_SECONDS.news);
+  const quoteSymbols = instrumentsSupporting('quote').map(function (instrument) { return instrument.symbol; });
+  const profileSymbols = stocksSupporting('profile').map(function (instrument) { return instrument.symbol; });
+  const metricSymbols = stocksSupporting('metrics').map(function (instrument) { return instrument.symbol; });
+  const newsSymbols = stocksSupporting('news').map(function (instrument) { return instrument.symbol; });
+  const quotes = summarizeRecords(entries[0], quoteSymbols, MAX_AGE_SECONDS.quotes);
+  const profiles = summarizeRecords(entries[1], profileSymbols, MAX_AGE_SECONDS.profiles);
+  const metrics = summarizeRecords(entries[2], metricSymbols, MAX_AGE_SECONDS.metrics);
+  const news = summarizeRecords(entries[3], newsSymbols, MAX_AGE_SECONDS.news);
   const categories = { quotes: quotes, profiles: profiles, metrics: metrics, news: news };
   const hasStoredData = Object.values(categories).some(function (entry) {
     return Object.keys(entry.data).length > 0;
   });
   if (!hasStoredData) {
-    const failure = storedProviderFailure(entries, true);
+    const failure = storedProviderFailure([
+      { records: entries[0], symbols: quoteSymbols },
+      { records: entries[1], symbols: profileSymbols },
+      { records: entries[2], symbols: metricSymbols },
+      { records: entries[3], symbols: newsSymbols },
+    ], true);
     if (failure) return providerErrorResponse(failure);
   }
 
@@ -93,7 +113,7 @@ async function handleDashboard(env) {
   }).filter(Boolean);
   const indicatorQuotes = {};
 
-  for (const symbol of INDICATORS) {
+  for (const symbol of INDICATOR_SYMBOLS) {
     if (quotes.data[symbol]) indicatorQuotes[symbol] = quotes.data[symbol];
   }
 
@@ -107,6 +127,7 @@ async function handleDashboard(env) {
         records: entry[1].providerStatus,
       }];
     })),
+    instruments: instrumentSupportSnapshot(),
     indicators: indicatorQuotes,
     stocks: {
       quotes: quotes.data,
@@ -201,6 +222,16 @@ function normalizeHistoricalPoints(points, resolution) {
   };
 }
 
+function unsupportedHistoricalError(instrument) {
+  return {
+    code: 'unsupported_instrument',
+    message: 'Data unavailable',
+    detail: instrument.unavailableReason || 'Historical data is not supported for this instrument.',
+    provider: null,
+    intentional: true,
+  };
+}
+
 function historicalSymbolError(record) {
   const status = record && record.providerStatus;
   if (status && status.ok === false) {
@@ -233,6 +264,16 @@ async function handleHistorical(url, env) {
 
   for (const rangeRequest of rangeRequests) {
     for (const symbol of rangeRequest.symbols) {
+      const instrument = instrumentBySymbol(symbol);
+      if (!instrument.support.historical) {
+        symbolRequests[symbol] = {
+          days: rangeRequest.days,
+          resolution: rangeRequest.resolution,
+          instrument: instrument,
+          supported: false,
+        };
+        continue;
+      }
       const storageKey = historicalStorageKey(
         symbol,
         HISTORICAL_SERIES.providerFunction,
@@ -243,6 +284,7 @@ async function handleHistorical(url, env) {
         days: rangeRequest.days,
         resolution: rangeRequest.resolution,
         storageKey: storageKey,
+        supported: true,
       };
       storageRequests.push({
         symbol: symbol,
@@ -262,6 +304,15 @@ async function handleHistorical(url, env) {
   for (const entry of Object.entries(symbolRequests)) {
     const symbol = entry[0];
     const request = entry[1];
+    if (!request.supported) {
+      errors[symbol] = unsupportedHistoricalError(request.instrument);
+      providerStatus[symbol] = {
+        supported: false,
+        intentional: true,
+        code: 'unsupported_instrument',
+      };
+      continue;
+    }
     const record = records[request.storageKey];
     const points = storedSeries[symbol] || [];
     if (record && record.providerStatus) providerStatus[symbol] = record.providerStatus;
@@ -278,13 +329,17 @@ async function handleHistorical(url, env) {
   }
 
   const hasSeries = Object.keys(series).length > 0;
+  const hasSupportedRequest = Object.values(symbolRequests).some(function (request) {
+    return request.supported;
+  });
   return jsonResponse({
     s: hasSeries ? (stale ? 'stale' : 'ok') : 'no_data',
     ...(hasSeries && stale ? { reason: 'partial_or_expired' } : {}),
-    ...(!hasSeries ? { reason: 'empty_range' } : {}),
+    ...(!hasSeries ? { reason: hasSupportedRequest ? 'empty_range' : 'unsupported_instruments' } : {}),
     updatedAt: updatedTimes.length ? updatedTimes.sort()[0] : null,
     stale: stale,
     providerStatus: providerStatus,
+    instruments: instrumentSupportSnapshot(),
     requests: rangeRequests,
     series: series,
     errors: errors,

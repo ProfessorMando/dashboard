@@ -1,4 +1,4 @@
-import { ALL_SYMBOLS, HISTORICAL_SERIES, SNAPSHOT_KEYS, STOCKS } from './config.js';
+import { HISTORICAL_SERIES, SNAPSHOT_KEYS, instrumentsSupporting, stocksSupporting } from './config.js';
 import {
   fetchAlphaVantageDaily,
   fetchFinnhub,
@@ -138,10 +138,12 @@ async function refreshRecords(env, options) {
   const checkedAt = isoNow();
   const request = createProviderRequester(env, options.provider);
 
-  const records = await mapWithConcurrency(options.symbols, options.concurrency, async function (symbol) {
+  const records = await mapWithConcurrency(options.instruments, options.concurrency, async function (instrument) {
+    const symbol = instrument.symbol;
+    const providerSymbol = instrument.providerSymbols[options.provider];
     const oldRecord = previous[symbol];
     try {
-      const value = await request(function () { return options.fetchSymbol(symbol); });
+      const value = await request(function () { return options.fetchSymbol(providerSymbol); });
       if (!options.isValid(value)) throw new Error(options.provider + ' returned no usable data');
       return {
         symbol: symbol,
@@ -164,7 +166,7 @@ async function refreshRecords(env, options) {
   await putMarketRecords(env.DB, options.key, records);
   return {
     successful: records.filter(function (record) { return record.providerStatus.ok; }).length,
-    total: options.symbols.length,
+    total: options.instruments.length,
     checkedAt: checkedAt,
   };
 }
@@ -172,7 +174,7 @@ async function refreshRecords(env, options) {
 export function refreshQuotes(env) {
   return refreshRecords(env, {
     key: SNAPSHOT_KEYS.quotes,
-    symbols: ALL_SYMBOLS,
+    instruments: instrumentsSupporting('quote'),
     provider: 'finnhub',
     concurrency: JOB_SETTINGS.quotes.concurrency,
     fetchSymbol: function (symbol) {
@@ -185,7 +187,7 @@ export function refreshQuotes(env) {
 export function refreshProfiles(env) {
   return refreshRecords(env, {
     key: SNAPSHOT_KEYS.profiles,
-    symbols: STOCKS,
+    instruments: stocksSupporting('profile'),
     provider: 'finnhub',
     concurrency: JOB_SETTINGS.profiles.concurrency,
     fetchSymbol: function (symbol) {
@@ -198,7 +200,7 @@ export function refreshProfiles(env) {
 export function refreshMetrics(env) {
   return refreshRecords(env, {
     key: SNAPSHOT_KEYS.metrics,
-    symbols: STOCKS,
+    instruments: stocksSupporting('metrics'),
     provider: 'finnhub',
     concurrency: JOB_SETTINGS.metrics.concurrency,
     fetchSymbol: function (symbol) {
@@ -215,7 +217,7 @@ export function refreshNews(env) {
 
   return refreshRecords(env, {
     key: SNAPSHOT_KEYS.news,
-    symbols: STOCKS,
+    instruments: stocksSupporting('news'),
     provider: 'finnhub',
     concurrency: JOB_SETTINGS.news.concurrency,
     fetchSymbol: function (symbol) {
@@ -236,9 +238,11 @@ export async function refreshHistorical(env) {
   const request = createProviderRequester(env, 'alphaVantage');
 
   const statusRecords = await mapWithConcurrency(
-    ALL_SYMBOLS,
+    instrumentsSupporting('historical'),
     JOB_SETTINGS.historical.concurrency,
-    async function (symbol) {
+    async function (instrument) {
+      const symbol = instrument.symbol;
+      const providerSymbol = instrument.providerSymbols.alphaVantage;
       const storageKey = historicalStorageKey(
         symbol,
         HISTORICAL_SERIES.providerFunction,
@@ -249,7 +253,7 @@ export async function refreshHistorical(env) {
       try {
         const series = await request(function () {
           return fetchAlphaVantageDaily(
-            symbol,
+            providerSymbol,
             env.ALPHA_VANTAGE_API_KEY,
             !oldRecord || !oldRecord.updatedAt
           );
@@ -295,7 +299,7 @@ export async function refreshHistorical(env) {
   await putMarketRecords(env.DB, 'historical', statusRecords);
   return {
     successful: statusRecords.filter(function (record) { return record.providerStatus.ok; }).length,
-    total: ALL_SYMBOLS.length,
+    total: instrumentsSupporting('historical').length,
     checkedAt: checkedAt,
   };
 }

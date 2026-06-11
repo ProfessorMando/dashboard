@@ -12,17 +12,62 @@ function retryAfterMilliseconds(response, now) {
   return Number.isFinite(date) ? Math.max(0, date - now) : null;
 }
 
-export class ProviderRateLimitError extends Error {
-  constructor(provider, retryAfterMs, message) {
-    super(message || provider + ' rate limit reached');
-    this.name = 'ProviderRateLimitError';
+export class ProviderResponseError extends Error {
+  constructor(provider, code, downstreamStatus, message, upstreamStatus) {
+    super(message);
+    this.name = 'ProviderResponseError';
     this.provider = provider;
+    this.code = code;
+    this.downstreamStatus = downstreamStatus;
+    this.upstreamStatus = upstreamStatus || null;
+  }
+}
+
+export class ProviderRateLimitError extends ProviderResponseError {
+  constructor(provider, retryAfterMs, message) {
+    super(provider, 'rate_limited', 503, message || provider + ' rate limit reached', 429);
+    this.name = 'ProviderRateLimitError';
     this.retryAfterMs = retryAfterMs;
   }
 }
 
 function providerError(raw) {
-  return raw.error || raw['Error Message'] || raw.Note || raw.Information;
+  return raw && typeof raw === 'object'
+    ? raw.error || raw['Error Message'] || raw.Note || raw.Information
+    : null;
+}
+
+function isJsonContentType(response) {
+  const contentType = response.headers.get('Content-Type') || '';
+  return /^(application\/json|[^;]+\+json)(?:\s*;|$)/i.test(contentType.trim());
+}
+
+function responseError(provider, response) {
+  if (response.status === 401 || response.status === 403) {
+    return new ProviderResponseError(
+      provider,
+      'authentication_failed',
+      502,
+      provider + ' authentication failed',
+      response.status
+    );
+  }
+  if (response.status >= 500) {
+    return new ProviderResponseError(
+      provider,
+      'upstream_unavailable',
+      503,
+      provider + ' is temporarily unavailable',
+      response.status
+    );
+  }
+  return new ProviderResponseError(
+    provider,
+    'upstream_http_error',
+    502,
+    provider + ' returned HTTP ' + response.status,
+    response.status
+  );
 }
 
 async function fetchJson(url, provider) {
@@ -36,24 +81,113 @@ async function fetchJson(url, provider) {
       provider + ' returned HTTP 429'
     );
   }
-  if (!response.ok) throw new Error(provider + ' returned HTTP ' + response.status);
+  if (!response.ok) throw responseError(provider, response);
+  if (!isJsonContentType(response)) {
+    throw new ProviderResponseError(
+      provider,
+      'invalid_content_type',
+      502,
+      provider + ' returned a non-JSON response',
+      response.status
+    );
+  }
 
-  const data = await response.json();
+  let data;
+  try {
+    data = JSON.parse(await response.text());
+  } catch (error) {
+    throw new ProviderResponseError(
+      provider,
+      'malformed_json',
+      502,
+      provider + ' returned malformed JSON',
+      response.status
+    );
+  }
+
   const message = providerError(data);
   if (message) {
     if (provider === 'alphaVantage' && (data.Note || data.Information)) {
       throw new ProviderRateLimitError(provider, null, 'Alpha Vantage rate limit reached');
     }
-    throw new Error(provider + ' rejected the request');
+    throw new ProviderResponseError(
+      provider,
+      'request_rejected',
+      502,
+      provider + ' rejected the request',
+      response.status
+    );
   }
   return data;
 }
 
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isFiniteNumber(value) {
+  return Number.isFinite(Number(value));
+}
+
+const FINNHUB_PAYLOAD_VALIDATORS = {
+  '/quote': function (data) {
+    return isObject(data) && isFiniteNumber(data.c) && isFiniteNumber(data.t);
+  },
+  '/stock/profile2': function (data) {
+    return isObject(data) && typeof data.ticker === 'string' && data.ticker.length > 0;
+  },
+  '/stock/metric': function (data) {
+    return isObject(data) && isObject(data.metric) && Object.keys(data.metric).length > 0;
+  },
+  '/company-news': function (data) {
+    return Array.isArray(data) && data.every(function (item) {
+      return isObject(item)
+        && Number.isFinite(Number(item.datetime))
+        && typeof item.headline === 'string';
+    });
+  },
+};
+
+function isCredentialParameter(name) {
+  return /(token|key|secret|password|passphrase|authorization|credential|signature)/i.test(name);
+}
+
+function validateFinnhubPayload(endpoint, data) {
+  const validator = FINNHUB_PAYLOAD_VALIDATORS[endpoint];
+  if (!validator || !validator(data)) {
+    throw new ProviderResponseError(
+      'finnhub',
+      'invalid_payload',
+      502,
+      'finnhub returned an invalid payload for ' + endpoint,
+      200
+    );
+  }
+}
+
 export async function fetchFinnhub(endpoint, params, apiKey) {
-  if (!apiKey) throw new Error('FINNHUB_API_KEY is not configured');
-  const search = new URLSearchParams(params);
+  if (!apiKey) {
+    throw new ProviderResponseError(
+      'finnhub',
+      'not_configured',
+      500,
+      'FINNHUB_API_KEY is not configured'
+    );
+  }
+
+  const search = new URLSearchParams();
+  Object.entries(params).sort(function (left, right) {
+    return left[0].localeCompare(right[0]) || String(left[1]).localeCompare(String(right[1]));
+  }).forEach(function (entry) {
+    if (!isCredentialParameter(entry[0])) {
+      search.append(entry[0], entry[1]);
+    }
+  });
   search.set('token', apiKey);
-  return fetchJson(FINNHUB_BASE + endpoint + '?' + search.toString(), 'finnhub');
+
+  const data = await fetchJson(FINNHUB_BASE + endpoint + '?' + search.toString(), 'finnhub');
+  validateFinnhubPayload(endpoint, data);
+  return data;
 }
 
 export async function fetchAlphaVantageDaily(symbol, apiKey, fullHistory) {

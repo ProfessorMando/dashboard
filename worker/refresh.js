@@ -1,5 +1,10 @@
 import { ALL_SYMBOLS, SNAPSHOT_KEYS, STOCKS } from './config.js';
-import { fetchAlphaVantageDaily, fetchFinnhub, ProviderRateLimitError } from './providers.js';
+import {
+  fetchAlphaVantageDaily,
+  fetchFinnhub,
+  ProviderRateLimitError,
+  ProviderResponseError,
+} from './providers.js';
 import {
   acquireRefreshLock,
   getMarketRecords,
@@ -42,6 +47,11 @@ function failedStatus(provider, checkedAt, error) {
     checkedAt: checkedAt,
     error: error instanceof Error ? error.message : 'Provider refresh failed',
   };
+  if (error instanceof ProviderResponseError) {
+    status.code = error.code;
+    status.downstreamStatus = error.downstreamStatus;
+    if (error.upstreamStatus) status.upstreamStatus = error.upstreamStatus;
+  }
   if (error instanceof ProviderRateLimitError && error.nextAllowedAt) {
     status.nextAllowedRefreshAt = new Date(error.nextAllowedAt).toISOString();
   }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createProviderRequester, mapWithConcurrency } from '../worker/refresh.js';
+import { createProviderRequester, mapWithConcurrency, refreshQuotes } from '../worker/refresh.js';
 import worker from '../worker/index.js';
 import { fetchFinnhub, ProviderRateLimitError } from '../worker/providers.js';
 
@@ -106,4 +106,212 @@ test('provider retry state persists a long Retry-After without waiting through i
   assert.equal(writes.length, 1);
   assert.equal(writes[0][0], 'finnhub');
   assert.ok(writes[0][1] >= before + 120000);
+});
+
+test('Finnhub requests sort public parameters and discard caller-supplied credentials', async function (context) {
+  const originalFetch = globalThis.fetch;
+  context.after(function () { globalThis.fetch = originalFetch; });
+  let requestedUrl;
+  globalThis.fetch = async function (url) {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify({ c: 100, t: 1700000000 }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  await fetchFinnhub('/quote', {
+    symbol: 'AAPL',
+    z: 'last',
+    password: 'discard-me',
+    apiKey: 'discard-me-too',
+    a: 'first',
+  }, 'server-secret');
+
+  const url = new URL(requestedUrl);
+  assert.equal(url.search, '?a=first&symbol=AAPL&z=last&token=server-secret');
+  assert.equal(url.searchParams.has('password'), false);
+  assert.equal(url.searchParams.has('apiKey'), false);
+});
+
+test('Finnhub rejects successful HTML responses', async function (context) {
+  const originalFetch = globalThis.fetch;
+  context.after(function () { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async function () {
+    return new Response('<html>upstream error</html>', {
+      headers: { 'Content-Type': 'text/html' },
+    });
+  };
+
+  await assert.rejects(
+    fetchFinnhub('/quote', { symbol: 'AAPL' }, 'secret'),
+    function (error) {
+      assert.equal(error.provider, 'finnhub');
+      assert.equal(error.code, 'invalid_content_type');
+      assert.equal(error.downstreamStatus, 502);
+      return true;
+    }
+  );
+});
+
+test('Finnhub rejects malformed JSON and endpoint-incompatible JSON', async function (context) {
+  const originalFetch = globalThis.fetch;
+  context.after(function () { globalThis.fetch = originalFetch; });
+
+  globalThis.fetch = async function () {
+    return new Response('{"c":', { headers: { 'Content-Type': 'application/json' } });
+  };
+  await assert.rejects(
+    fetchFinnhub('/quote', { symbol: 'AAPL' }, 'secret'),
+    function (error) { return error.code === 'malformed_json'; }
+  );
+
+  globalThis.fetch = async function () {
+    return new Response(JSON.stringify({ ticker: 'AAPL' }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  await assert.rejects(
+    fetchFinnhub('/quote', { symbol: 'AAPL' }, 'secret'),
+    function (error) { return error.code === 'invalid_payload'; }
+  );
+});
+
+test('dashboard returns a normalized provider error when no fallback exists', async function () {
+  const failedStatus = JSON.stringify({
+    provider: 'finnhub',
+    ok: false,
+    code: 'rate_limited',
+    downstreamStatus: 503,
+  });
+  const db = {
+    prepare() {
+      return {
+        bind(dataType) {
+          return {
+            async all() {
+              return dataType === 'quotes' ? {
+                results: [{
+                  symbol: 'AAPL',
+                  data: null,
+                  updated_at: null,
+                  checked_at: '2026-06-11T00:00:00.000Z',
+                  provider_status: failedStatus,
+                }],
+              } : { results: [] };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request('https://dashboard.example/api/dashboard'),
+    { DB: db }
+  );
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    error: {
+      code: 'rate_limited',
+      message: 'No stored market data is available',
+      provider: 'finnhub',
+    },
+    stale: false,
+  });
+});
+
+test('dashboard serves an older valid fallback as stale after provider failure', async function () {
+  const failedStatus = JSON.stringify({
+    provider: 'finnhub',
+    ok: false,
+    code: 'upstream_unavailable',
+    downstreamStatus: 503,
+  });
+  const db = {
+    prepare() {
+      return {
+        bind(dataType) {
+          return {
+            async all() {
+              return dataType === 'quotes' ? {
+                results: [{
+                  symbol: 'AAPL',
+                  data: JSON.stringify({ c: 190, t: 1700000000 }),
+                  updated_at: '2020-01-01T00:00:00.000Z',
+                  checked_at: '2026-06-11T00:00:00.000Z',
+                  provider_status: failedStatus,
+                }],
+              } : { results: [] };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request('https://dashboard.example/api/dashboard'),
+    { DB: db }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.stale, true);
+  assert.deepEqual(body.stocks.quotes.AAPL, { c: 190, t: 1700000000 });
+  assert.equal(body.providerStatus.quotes.records.AAPL.ok, false);
+});
+
+
+test('invalid Finnhub refreshes retain stored valid records', async function (context) {
+  const originalFetch = globalThis.fetch;
+  context.after(function () { globalThis.fetch = originalFetch; });
+  globalThis.fetch = async function () {
+    return new Response('<html>temporary failure</html>', {
+      headers: { 'Content-Type': 'text/html' },
+    });
+  };
+
+  const writes = [];
+  const db = {
+    prepare(sql) {
+      return {
+        bind(...values) {
+          if (/FROM market_records/.test(sql)) {
+            return {
+              async all() {
+                return {
+                  results: [{
+                    symbol: 'AAPL',
+                    data: JSON.stringify({ c: 190, t: 1700000000 }),
+                    updated_at: '2026-06-10T00:00:00.000Z',
+                    checked_at: '2026-06-10T00:00:00.000Z',
+                    provider_status: JSON.stringify({ provider: 'finnhub', ok: true }),
+                  }],
+                };
+              },
+            };
+          }
+          if (/FROM provider_backoff/.test(sql)) {
+            return { async first() { return null; } };
+          }
+          return { sql: sql, values: values };
+        },
+      };
+    },
+    async batch(statements) {
+      writes.push(...statements);
+    },
+  };
+
+  const result = await refreshQuotes({ DB: db, FINNHUB_API_KEY: 'secret' });
+  const aaplWrite = writes.find(function (statement) {
+    return statement.values[1] === 'AAPL';
+  });
+
+  assert.equal(result.successful, 0);
+  assert.ok(aaplWrite);
+  assert.deepEqual(JSON.parse(aaplWrite.values[2]), { c: 190, t: 1700000000 });
+  assert.equal(aaplWrite.values[3], '2026-06-10T00:00:00.000Z');
+  assert.equal(JSON.parse(aaplWrite.values[5]).code, 'invalid_content_type');
 });

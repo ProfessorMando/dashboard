@@ -40,10 +40,10 @@ function summarizeRecords(records, symbols, maxAgeSeconds) {
   };
 }
 
-function storedProviderFailure(recordGroups) {
+function storedProviderFailure(recordGroups, requireMissingData) {
   const failures = recordGroups.flatMap(function (records) {
     return Object.values(records).filter(function (record) {
-      return record && record.data === null && record.providerStatus
+      return record && (!requireMissingData || record.data === null) && record.providerStatus
         && record.providerStatus.ok === false;
     }).map(function (record) { return record.providerStatus; });
   });
@@ -55,9 +55,12 @@ function storedProviderFailure(recordGroups) {
 }
 
 function providerErrorResponse(failure) {
+  const reason = failure.code || 'provider_unavailable';
   return jsonResponse({
+    s: 'no_data',
+    reason: reason,
     error: {
-      code: failure.code || 'provider_unavailable',
+      code: reason,
       message: 'No stored market data is available',
       provider: failure.provider || 'unknown',
     },
@@ -81,7 +84,7 @@ async function handleDashboard(env) {
     return Object.keys(entry.data).length > 0;
   });
   if (!hasStoredData) {
-    const failure = storedProviderFailure(entries);
+    const failure = storedProviderFailure(entries, true);
     if (failure) return providerErrorResponse(failure);
   }
 
@@ -124,12 +127,22 @@ async function handleHistorical(url, env) {
   const records = await getMarketRecords(env.DB, 'historical');
   const metadata = summarizeRecords(records, ALL_SYMBOLS, MAX_AGE_SECONDS.historical);
   const series = await getHistoricalSeries(env.DB, dateDaysAgo(days));
+  const failure = storedProviderFailure([records], false);
   if (!Object.keys(series).length) {
-    const failure = storedProviderFailure([records]);
     if (failure) return providerErrorResponse(failure);
+    return jsonResponse({
+      s: 'no_data',
+      reason: 'empty_range',
+      updatedAt: metadata.updatedAt,
+      stale: metadata.stale,
+      providerStatus: metadata.providerStatus,
+      series: {},
+    });
   }
 
   return jsonResponse({
+    s: metadata.stale ? 'stale' : 'ok',
+    ...(metadata.stale ? { reason: failure ? failure.code || 'provider_unavailable' : 'expired' } : {}),
     updatedAt: metadata.updatedAt,
     stale: metadata.stale,
     providerStatus: metadata.providerStatus,

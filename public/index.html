@@ -948,12 +948,14 @@ async function apiFetch(endpoint, params = {}) {
   const res = await fetch(url.toString());
   if (!res.ok) {
     var serverMessage = '';
+    var errorData = null;
     try {
       const body = await res.text();
       if (body) {
         try {
-          const errorData = JSON.parse(body);
+          errorData = JSON.parse(body);
           if (typeof errorData.error === 'string') serverMessage = errorData.error;
+          else if (errorData.error && typeof errorData.error.message === 'string') serverMessage = errorData.error.message;
           else if (typeof errorData.message === 'string') serverMessage = errorData.message;
         } catch (e) {
           serverMessage = body;
@@ -966,7 +968,11 @@ async function apiFetch(endpoint, params = {}) {
     serverMessage = serverMessage.replace(/([?&](?:token|api_?key)=)[^&\s]+/gi, '$1[redacted]').trim();
     if (serverMessage.length > 300) serverMessage = serverMessage.slice(0, 300) + '…';
 
-    throw new Error('API error ' + res.status + (serverMessage ? ': ' + serverMessage : ''));
+    var apiError = new Error('API error ' + res.status + (serverMessage ? ': ' + serverMessage : ''));
+    apiError.httpStatus = res.status;
+    if (errorData && typeof errorData.s === 'string') apiError.dataStatus = errorData.s;
+    if (errorData && typeof errorData.reason === 'string') apiError.reason = errorData.reason;
+    throw apiError;
   }
   const data = await res.json();
   if (data.error) throw new Error(data.error);

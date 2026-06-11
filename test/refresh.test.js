@@ -212,6 +212,8 @@ test('dashboard returns a normalized provider error when no fallback exists', as
 
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), {
+    s: 'no_data',
+    reason: 'rate_limited',
     error: {
       code: 'rate_limited',
       message: 'No stored market data is available',
@@ -314,4 +316,115 @@ test('invalid Finnhub refreshes retain stored valid records', async function (co
   assert.deepEqual(JSON.parse(aaplWrite.values[2]), { c: 190, t: 1700000000 });
   assert.equal(aaplWrite.values[3], '2026-06-10T00:00:00.000Z');
   assert.equal(JSON.parse(aaplWrite.values[5]).code, 'invalid_content_type');
+});
+
+test('historical API reports provider unavailability as structured no-data status', async function () {
+  const failedStatus = JSON.stringify({
+    provider: 'alphaVantage',
+    ok: false,
+    code: 'rate_limited',
+    downstreamStatus: 503,
+  });
+  const db = {
+    prepare(sql) {
+      return {
+        bind() {
+          return {
+            async all() {
+              if (/FROM market_records/.test(sql)) {
+                return { results: [{
+                  symbol: 'AAPL',
+                  data: null,
+                  updated_at: null,
+                  checked_at: '2026-06-11T00:00:00.000Z',
+                  provider_status: failedStatus,
+                }] };
+              }
+              return { results: [] };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request('https://dashboard.example/api/historical?days=30'),
+    { DB: db }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 503);
+  assert.equal(body.s, 'no_data');
+  assert.equal(body.reason, 'rate_limited');
+});
+
+test('historical API marks preserved series stale when its latest refresh failed', async function () {
+  const failedStatus = JSON.stringify({
+    provider: 'alphaVantage',
+    ok: false,
+    code: 'upstream_unavailable',
+    downstreamStatus: 503,
+  });
+  const db = {
+    prepare(sql) {
+      return {
+        bind() {
+          return {
+            async all() {
+              if (/FROM market_records/.test(sql)) {
+                return { results: [{
+                  symbol: 'AAPL',
+                  data: JSON.stringify({ rowCount: 100 }),
+                  updated_at: '2026-06-10T00:00:00.000Z',
+                  checked_at: '2026-06-11T00:00:00.000Z',
+                  provider_status: failedStatus,
+                }] };
+              }
+              return { results: [{ symbol: 'AAPL', trading_date: '2026-06-10', close: 201.25 }] };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request('https://dashboard.example/api/historical?days=30'),
+    { DB: db }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.s, 'stale');
+  assert.equal(body.reason, 'upstream_unavailable');
+  assert.deepEqual(body.series.AAPL.c, [201.25]);
+});
+
+test('historical API distinguishes an empty requested range from provider failure', async function () {
+  const db = {
+    prepare(sql) {
+      return {
+        bind() {
+          return {
+            async all() {
+              if (/FROM market_records/.test(sql)) return { results: [] };
+              return { results: [] };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const response = await worker.fetch(
+    new Request('https://dashboard.example/api/historical?days=1'),
+    { DB: db }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.s, 'no_data');
+  assert.equal(body.reason, 'empty_range');
+  assert.deepEqual(body.series, {});
 });

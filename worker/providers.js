@@ -1,5 +1,10 @@
 const FINNHUB_BASE = 'https://finnhub.io/api/v1';
 const ALPHA_VANTAGE_BASE = 'https://www.alphavantage.co/query';
+const ALPHA_VANTAGE_TIME_SERIES_KEYS = new Set([
+  'Time Series (Daily)',
+  'Weekly Time Series',
+  'Monthly Time Series',
+]);
 
 function retryAfterMilliseconds(response, now) {
   const value = response.headers.get('Retry-After');
@@ -126,7 +131,30 @@ function isObject(value) {
 }
 
 function isFiniteNumber(value) {
-  return Number.isFinite(Number(value));
+  return value !== '' && value !== null && Number.isFinite(Number(value));
+}
+
+function isTradingDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(value + 'T00:00:00Z');
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function validAlphaVantageSeries(data) {
+  if (!isObject(data)) return null;
+
+  for (const key of ALPHA_VANTAGE_TIME_SERIES_KEYS) {
+    const series = data[key];
+    if (!isObject(series)) continue;
+
+    const validEntries = Object.entries(series).filter(function (entry) {
+      return isTradingDate(entry[0])
+        && isObject(entry[1])
+        && isFiniteNumber(entry[1]['4. close']);
+    });
+    if (validEntries.length) return Object.fromEntries(validEntries);
+  }
+  return null;
 }
 
 const FINNHUB_PAYLOAD_VALIDATORS = {
@@ -191,7 +219,14 @@ export async function fetchFinnhub(endpoint, params, apiKey) {
 }
 
 export async function fetchAlphaVantageDaily(symbol, apiKey, fullHistory) {
-  if (!apiKey) throw new Error('ALPHA_VANTAGE_API_KEY is not configured');
+  if (!apiKey) {
+    throw new ProviderResponseError(
+      'alphaVantage',
+      'not_configured',
+      500,
+      'ALPHA_VANTAGE_API_KEY is not configured'
+    );
+  }
   const search = new URLSearchParams({
     function: 'TIME_SERIES_DAILY',
     symbol: symbol,
@@ -200,7 +235,15 @@ export async function fetchAlphaVantageDaily(symbol, apiKey, fullHistory) {
   });
   const data = await fetchJson(ALPHA_VANTAGE_BASE + '?' + search.toString(), 'alphaVantage');
 
-  const seriesKey = Object.keys(data).find(function (key) { return key.startsWith('Time Series'); });
-  if (!seriesKey) throw new Error('Alpha Vantage returned no daily series');
-  return data[seriesKey];
+  const series = validAlphaVantageSeries(data);
+  if (!series) {
+    throw new ProviderResponseError(
+      'alphaVantage',
+      'invalid_payload',
+      502,
+      'Alpha Vantage returned no valid time series',
+      200
+    );
+  }
+  return series;
 }

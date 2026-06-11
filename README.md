@@ -41,7 +41,7 @@ Refresh jobs use explicit per-job concurrency limits, in-isolate single-flight c
 ## Read endpoints
 
 - `GET /api/dashboard` returns all indicator quotes and stock-card quote, profile, metric, and news data.
-- `GET /api/historical?days=365` returns every stored graph series for the requested lookback, up to 10 years.
+- `GET /api/historical?days=365` returns every stored graph series for the requested lookback, up to 10 years. Its `s` field is `ok`, `stale`, or `no_data`; `reason` distinguishes provider failures from an `empty_range`.
 - `GET /api/health` reports whether the D1 and provider bindings are configured without exposing credentials.
 
 Aggregate responses include `updatedAt`, `stale`, and `providerStatus`. The API reads storage only; stale reads do not trigger provider requests.

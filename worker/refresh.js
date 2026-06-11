@@ -1,4 +1,4 @@
-import { ALL_SYMBOLS, SNAPSHOT_KEYS, STOCKS } from './config.js';
+import { ALL_SYMBOLS, HISTORICAL_SERIES, SNAPSHOT_KEYS, STOCKS } from './config.js';
 import {
   fetchAlphaVantageDaily,
   fetchFinnhub,
@@ -8,6 +8,7 @@ import {
 import {
   acquireRefreshLock,
   getMarketRecords,
+  historicalStorageKey,
   getProviderBackoff,
   putMarketRecords,
   recordProviderBackoff,
@@ -238,7 +239,13 @@ export async function refreshHistorical(env) {
     ALL_SYMBOLS,
     JOB_SETTINGS.historical.concurrency,
     async function (symbol) {
-      const oldRecord = previous[symbol];
+      const storageKey = historicalStorageKey(
+        symbol,
+        HISTORICAL_SERIES.providerFunction,
+        HISTORICAL_SERIES.outputSize,
+        HISTORICAL_SERIES.normalizationVersion
+      );
+      const oldRecord = previous[storageKey];
       try {
         const series = await request(function () {
           return fetchAlphaVantageDaily(
@@ -250,7 +257,11 @@ export async function refreshHistorical(env) {
         const providerStatus = successfulStatus('alphaVantage', checkedAt);
         const rows = Object.entries(series).map(function (entry) {
           return {
+            storageKey: storageKey,
             symbol: symbol,
+            providerFunction: HISTORICAL_SERIES.providerFunction,
+            outputSize: HISTORICAL_SERIES.outputSize,
+            normalizationVersion: HISTORICAL_SERIES.normalizationVersion,
             tradingDate: entry[0],
             close: Number(entry[1]['4. close']),
             updatedAt: checkedAt,
@@ -263,16 +274,16 @@ export async function refreshHistorical(env) {
         if (rows.length === 0) throw new Error('Alpha Vantage returned no usable prices');
         await upsertHistoricalRows(env.DB, rows);
         return {
-          symbol: symbol,
-          data: { rowCount: rows.length },
+          symbol: storageKey,
+          data: { symbol: symbol, rowCount: rows.length },
           updatedAt: checkedAt,
           checkedAt: checkedAt,
           providerStatus: providerStatus,
         };
       } catch (error) {
         return {
-          symbol: symbol,
-          data: oldRecord ? oldRecord.data : null,
+          symbol: storageKey,
+          data: oldRecord ? oldRecord.data : { symbol: symbol, rowCount: 0 },
           updatedAt: oldRecord ? oldRecord.updatedAt : null,
           checkedAt: checkedAt,
           providerStatus: failedStatus('alphaVantage', checkedAt, error),

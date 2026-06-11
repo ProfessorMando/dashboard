@@ -141,7 +141,7 @@ test('failed historical refreshes retain the last valid status record and do not
               async all() {
                 return {
                   results: [{
-                    symbol: 'AAPL',
+                    symbol: 'historical|symbol=AAPL|function=TIME_SERIES_DAILY|outputsize=full|normalization=v1',
                     data: JSON.stringify({ rowCount: 100 }),
                     updated_at: '2026-06-10T00:00:00.000Z',
                     checked_at: '2026-06-10T00:00:00.000Z',
@@ -160,7 +160,7 @@ test('failed historical refreshes retain the last valid status record and do not
     },
     async batch(statements) {
       if (statements.some(function (statement) {
-        return /historical_prices/.test(statement.sql || '');
+        return /historical_series_prices/.test(statement.sql || '');
       })) {
         historicalPriceWrites += statements.length;
       } else {
@@ -171,7 +171,7 @@ test('failed historical refreshes retain the last valid status record and do not
 
   const result = await refreshHistorical({ DB: db, ALPHA_VANTAGE_API_KEY: 'secret' });
   const aaplWrite = marketWrites.find(function (statement) {
-    return statement.values[1] === 'AAPL';
+    return statement.values[1] === 'historical|symbol=AAPL|function=TIME_SERIES_DAILY|outputsize=full|normalization=v1';
   });
 
   assert.equal(result.successful, 0);

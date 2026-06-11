@@ -72,37 +72,66 @@ export async function releaseRefreshLock(db, name, owner) {
   ).bind(name, owner).run();
 }
 
+export function historicalStorageKey(symbol, providerFunction, outputSize, normalizationVersion) {
+  return [
+    'historical',
+    'symbol=' + encodeURIComponent(symbol),
+    'function=' + encodeURIComponent(providerFunction),
+    'outputsize=' + encodeURIComponent(outputSize),
+    'normalization=' + encodeURIComponent(normalizationVersion),
+  ].join('|');
+}
+
 export async function upsertHistoricalRows(db, rows) {
   const batchSize = 75;
   for (let offset = 0; offset < rows.length; offset += batchSize) {
     const statements = rows.slice(offset, offset + batchSize).map(function (row) {
       return db.prepare(`
-        INSERT INTO historical_prices
-          (symbol, trading_date, close, updated_at, provider_status)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(symbol, trading_date) DO UPDATE SET
+        INSERT INTO historical_series_prices
+          (storage_key, symbol, provider_function, output_size, normalization_version,
+           trading_date, close, updated_at, provider_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(storage_key, trading_date) DO UPDATE SET
           close = excluded.close,
           updated_at = excluded.updated_at,
           provider_status = excluded.provider_status
-      `).bind(row.symbol, row.tradingDate, row.close, row.updatedAt, row.providerStatus);
+      `).bind(
+        row.storageKey,
+        row.symbol,
+        row.providerFunction,
+        row.outputSize,
+        row.normalizationVersion,
+        row.tradingDate,
+        row.close,
+        row.updatedAt,
+        row.providerStatus
+      );
     });
     await db.batch(statements);
   }
 }
 
-export async function getHistoricalSeries(db, fromDate) {
+export async function getHistoricalSeries(db, requests) {
+  if (!requests.length) return {};
+
+  const clauses = requests.map(function () { return '(storage_key = ? AND trading_date >= ?)'; });
+  const bindings = requests.flatMap(function (request) {
+    return [request.storageKey, request.fromDate];
+  });
   const result = await db.prepare(`
-    SELECT symbol, trading_date, close
-    FROM historical_prices
-    WHERE trading_date >= ?
-    ORDER BY symbol, trading_date
-  `).bind(fromDate).all();
+    SELECT storage_key, symbol, trading_date, close
+    FROM historical_series_prices
+    WHERE ${clauses.join(' OR ')}
+    ORDER BY storage_key, trading_date
+  `).bind(...bindings).all();
   const series = {};
 
   for (const row of result.results || []) {
-    if (!series[row.symbol]) series[row.symbol] = { c: [], t: [] };
-    series[row.symbol].c.push(row.close);
-    series[row.symbol].t.push(Math.floor(Date.parse(row.trading_date + 'T00:00:00Z') / 1000));
+    if (!series[row.symbol]) series[row.symbol] = [];
+    series[row.symbol].push({
+      close: row.close,
+      tradingDate: row.trading_date,
+    });
   }
   return series;
 }

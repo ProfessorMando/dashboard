@@ -41,7 +41,7 @@ Refresh jobs use explicit per-job concurrency limits, in-isolate single-flight c
 ## Read endpoints
 
 - `GET /api/dashboard` returns all indicator quotes and stock-card quote, profile, metric, and news data.
-- `GET /api/historical?days=365` returns every stored graph series for the requested lookback, up to 10 years. Its `s` field is `ok`, `stale`, or `no_data`; `reason` distinguishes provider failures from an `empty_range`.
+- `GET /api/historical?symbols=AAPL,SPY&days=365&resolution=D` returns the requested stored graph series for a lookback of up to 10 years. `resolution` is `D` for stored daily closes or `W` for server-resampled weekly closes. The endpoint also accepts a JSON-encoded `requests` array so disjoint symbol sets can request different ranges and resolutions in one aggregate read. Its `s` field is `ok`, `stale`, or `no_data`, while `errors` reports failures independently for each requested symbol.
 - `GET /api/health` reports whether the D1 and provider bindings are configured without exposing credentials.
 
-Aggregate responses include `updatedAt`, `stale`, and `providerStatus`. The API reads storage only; stale reads do not trigger provider requests.
+Aggregate responses include `updatedAt`, `stale`, and `providerStatus`. Historical records use a canonical key containing the symbol, provider function, provider output size, and normalization version, so distinct historical representations cannot collide. The API reads storage only; stale reads do not trigger provider requests.

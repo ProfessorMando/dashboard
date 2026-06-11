@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { createProviderRequester, mapWithConcurrency, refreshQuotes } from '../worker/refresh.js';
@@ -333,7 +334,7 @@ test('historical API reports provider unavailability as structured no-data statu
             async all() {
               if (/FROM market_records/.test(sql)) {
                 return { results: [{
-                  symbol: 'AAPL',
+                  symbol: 'historical|symbol=AAPL|function=TIME_SERIES_DAILY|outputsize=full|normalization=v1',
                   data: null,
                   updated_at: null,
                   checked_at: '2026-06-11T00:00:00.000Z',
@@ -349,14 +350,15 @@ test('historical API reports provider unavailability as structured no-data statu
   };
 
   const response = await worker.fetch(
-    new Request('https://dashboard.example/api/historical?days=30'),
+    new Request('https://dashboard.example/api/historical?symbols=AAPL&days=30&resolution=D'),
     { DB: db }
   );
   const body = await response.json();
 
-  assert.equal(response.status, 503);
+  assert.equal(response.status, 200);
   assert.equal(body.s, 'no_data');
-  assert.equal(body.reason, 'rate_limited');
+  assert.equal(body.reason, 'empty_range');
+  assert.equal(body.errors.AAPL.code, 'rate_limited');
 });
 
 test('historical API marks preserved series stale when its latest refresh failed', async function () {
@@ -374,7 +376,7 @@ test('historical API marks preserved series stale when its latest refresh failed
             async all() {
               if (/FROM market_records/.test(sql)) {
                 return { results: [{
-                  symbol: 'AAPL',
+                  symbol: 'historical|symbol=AAPL|function=TIME_SERIES_DAILY|outputsize=full|normalization=v1',
                   data: JSON.stringify({ rowCount: 100 }),
                   updated_at: '2026-06-10T00:00:00.000Z',
                   checked_at: '2026-06-11T00:00:00.000Z',
@@ -390,14 +392,15 @@ test('historical API marks preserved series stale when its latest refresh failed
   };
 
   const response = await worker.fetch(
-    new Request('https://dashboard.example/api/historical?days=30'),
+    new Request('https://dashboard.example/api/historical?symbols=AAPL&days=30&resolution=D'),
     { DB: db }
   );
   const body = await response.json();
 
   assert.equal(response.status, 200);
   assert.equal(body.s, 'stale');
-  assert.equal(body.reason, 'upstream_unavailable');
+  assert.equal(body.reason, 'partial_or_expired');
+  assert.equal(body.providerStatus.AAPL.code, 'upstream_unavailable');
   assert.deepEqual(body.series.AAPL.c, [201.25]);
 });
 
@@ -427,4 +430,73 @@ test('historical API distinguishes an empty requested range from provider failur
   assert.equal(body.s, 'no_data');
   assert.equal(body.reason, 'empty_range');
   assert.deepEqual(body.series, {});
+});
+
+test('historical API aggregates requested ranges, resamples weekly data, and isolates symbol errors', async function () {
+  const aaplKey = 'historical|symbol=AAPL|function=TIME_SERIES_DAILY|outputsize=full|normalization=v1';
+  const spyKey = 'historical|symbol=SPY|function=TIME_SERIES_DAILY|outputsize=full|normalization=v1';
+  const db = {
+    prepare(sql) {
+      return {
+        bind() {
+          return {
+            async all() {
+              if (/FROM market_records/.test(sql)) {
+                return { results: [
+                  {
+                    symbol: aaplKey,
+                    data: JSON.stringify({ symbol: 'AAPL', rowCount: 3 }),
+                    updated_at: new Date().toISOString(),
+                    checked_at: new Date().toISOString(),
+                    provider_status: JSON.stringify({ provider: 'alphaVantage', ok: true }),
+                  },
+                  {
+                    symbol: spyKey,
+                    data: JSON.stringify({ symbol: 'SPY', rowCount: 0 }),
+                    updated_at: null,
+                    checked_at: new Date().toISOString(),
+                    provider_status: JSON.stringify({
+                      provider: 'alphaVantage',
+                      ok: false,
+                      code: 'rate_limited',
+                    }),
+                  },
+                ] };
+              }
+              return { results: [
+                { storage_key: aaplKey, symbol: 'AAPL', trading_date: '2026-06-01', close: 100 },
+                { storage_key: aaplKey, symbol: 'AAPL', trading_date: '2026-06-05', close: 105 },
+                { storage_key: aaplKey, symbol: 'AAPL', trading_date: '2026-06-08', close: 110 },
+              ] };
+            },
+          };
+        },
+      };
+    },
+  };
+  const requests = JSON.stringify([
+    { symbols: ['AAPL'], days: 30, resolution: 'W' },
+    { symbols: ['SPY'], days: 7, resolution: 'D' },
+  ]);
+
+  const response = await worker.fetch(
+    new Request('https://dashboard.example/api/historical?requests=' + encodeURIComponent(requests)),
+    { DB: db }
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.s, 'stale');
+  assert.deepEqual(body.series.AAPL.c, [105, 110]);
+  assert.equal(body.series.SPY, undefined);
+  assert.equal(body.errors.SPY.code, 'rate_limited');
+  assert.equal(body.requests[0].resolution, 'W');
+});
+
+test('graph refresh uses one aggregate historical request and expires failed cache entries', async function () {
+  const source = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+
+  assert.match(source, /var data = await fetchAllGraphData\(requests, forceRefresh\)/);
+  assert.match(source, /requests: JSON\.stringify\(requests\)/);
+  assert.match(source, /expiresAt: Date\.now\(\) \+ GRAPH_FAILURE_CACHE_MS/);
 });

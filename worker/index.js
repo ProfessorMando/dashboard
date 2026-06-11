@@ -1,6 +1,6 @@
-import { ALL_SYMBOLS, CRON_JOBS, INDICATORS, MAX_AGE_SECONDS, SNAPSHOT_KEYS, STOCKS } from './config.js';
+import { ALL_SYMBOLS, CRON_JOBS, HISTORICAL_SERIES, INDICATORS, MAX_AGE_SECONDS, SNAPSHOT_KEYS, STOCKS } from './config.js';
 import { runRefreshJob } from './refresh.js';
-import { getHistoricalSeries, getMarketRecords } from './storage.js';
+import { getHistoricalSeries, getMarketRecords, historicalStorageKey } from './storage.js';
 
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
@@ -121,32 +121,173 @@ function dateDaysAgo(days) {
   return new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 10);
 }
 
-async function handleHistorical(url, env) {
-  const requestedDays = Number.parseInt(url.searchParams.get('days') || '3650', 10);
-  const days = Number.isFinite(requestedDays) ? Math.min(Math.max(requestedDays, 1), 3650) : 3650;
-  const records = await getMarketRecords(env.DB, 'historical');
-  const metadata = summarizeRecords(records, ALL_SYMBOLS, MAX_AGE_SECONDS.historical);
-  const series = await getHistoricalSeries(env.DB, dateDaysAgo(days));
-  const failure = storedProviderFailure([records], false);
-  if (!Object.keys(series).length) {
-    if (failure) return providerErrorResponse(failure);
-    return jsonResponse({
-      s: 'no_data',
-      reason: 'empty_range',
-      updatedAt: metadata.updatedAt,
-      stale: metadata.stale,
-      providerStatus: metadata.providerStatus,
-      series: {},
-    });
+function historicalRequestError(message) {
+  return { error: 'Invalid historical request', message: message };
+}
+
+function normalizeHistoricalRequest(rawRequest) {
+  const requestedSymbols = Array.isArray(rawRequest.symbols)
+    ? rawRequest.symbols
+    : String(rawRequest.symbols || '').split(',');
+  const symbols = Array.from(new Set(requestedSymbols.map(function (symbol) {
+    return String(symbol).trim().toUpperCase();
+  }).filter(Boolean)));
+  const requestedDays = Number.parseInt(rawRequest.days || '3650', 10);
+  const resolution = String(rawRequest.resolution || 'D').toUpperCase();
+
+  if (!symbols.length) throw new Error('At least one symbol is required');
+  const unsupported = symbols.filter(function (symbol) { return !ALL_SYMBOLS.includes(symbol); });
+  if (unsupported.length) throw new Error('Unsupported symbols: ' + unsupported.join(', '));
+  if (!Number.isFinite(requestedDays) || requestedDays < 1 || requestedDays > 3650) {
+    throw new Error('days must be an integer from 1 through 3650');
+  }
+  if (resolution !== 'D' && resolution !== 'W') {
+    throw new Error('resolution must be D or W');
   }
 
+  return { symbols: symbols, days: requestedDays, resolution: resolution };
+}
+
+function parseHistoricalRequests(url) {
+  const aggregate = url.searchParams.get('requests');
+  if (aggregate) {
+    let parsed;
+    try {
+      parsed = JSON.parse(aggregate);
+    } catch (error) {
+      throw new Error('requests must be valid JSON');
+    }
+    if (!Array.isArray(parsed) || !parsed.length) {
+      throw new Error('requests must be a non-empty array');
+    }
+    const requests = parsed.map(normalizeHistoricalRequest);
+    const seen = new Set();
+    for (const request of requests) {
+      for (const symbol of request.symbols) {
+        if (seen.has(symbol)) throw new Error('Each symbol may appear in only one requested range');
+        seen.add(symbol);
+      }
+    }
+    return requests;
+  }
+
+  return [normalizeHistoricalRequest({
+    symbols: url.searchParams.get('symbols') || ALL_SYMBOLS.join(','),
+    days: url.searchParams.get('days') || '3650',
+    resolution: url.searchParams.get('resolution') || 'D',
+  })];
+}
+
+function weekStart(tradingDate) {
+  const date = new Date(tradingDate + 'T00:00:00Z');
+  const day = date.getUTCDay();
+  date.setUTCDate(date.getUTCDate() - (day === 0 ? 6 : day - 1));
+  return date.toISOString().slice(0, 10);
+}
+
+function normalizeHistoricalPoints(points, resolution) {
+  let normalized = points;
+  if (resolution === 'W') {
+    const weeks = new Map();
+    for (const point of points) weeks.set(weekStart(point.tradingDate), point);
+    normalized = Array.from(weeks.values());
+  }
+
+  return {
+    c: normalized.map(function (point) { return Number(point.close); }),
+    t: normalized.map(function (point) {
+      return Math.floor(Date.parse(point.tradingDate + 'T00:00:00Z') / 1000);
+    }),
+  };
+}
+
+function historicalSymbolError(record) {
+  const status = record && record.providerStatus;
+  if (status && status.ok === false) {
+    return {
+      code: status.code || 'provider_unavailable',
+      message: status.error || 'Historical data is unavailable for this symbol',
+      provider: status.provider || HISTORICAL_SERIES.provider,
+    };
+  }
+  return {
+    code: record ? 'empty_range' : 'not_stored',
+    message: record
+      ? 'No stored historical data is available in the requested range'
+      : 'No stored historical data is available for this symbol',
+    provider: HISTORICAL_SERIES.provider,
+  };
+}
+
+async function handleHistorical(url, env) {
+  let rangeRequests;
+  try {
+    rangeRequests = parseHistoricalRequests(url);
+  } catch (error) {
+    return jsonResponse(historicalRequestError(error.message), 400);
+  }
+
+  const records = await getMarketRecords(env.DB, 'historical');
+  const storageRequests = [];
+  const symbolRequests = {};
+
+  for (const rangeRequest of rangeRequests) {
+    for (const symbol of rangeRequest.symbols) {
+      const storageKey = historicalStorageKey(
+        symbol,
+        HISTORICAL_SERIES.providerFunction,
+        HISTORICAL_SERIES.outputSize,
+        HISTORICAL_SERIES.normalizationVersion
+      );
+      symbolRequests[symbol] = {
+        days: rangeRequest.days,
+        resolution: rangeRequest.resolution,
+        storageKey: storageKey,
+      };
+      storageRequests.push({
+        symbol: symbol,
+        storageKey: storageKey,
+        fromDate: dateDaysAgo(rangeRequest.days),
+      });
+    }
+  }
+
+  const storedSeries = await getHistoricalSeries(env.DB, storageRequests);
+  const series = {};
+  const errors = {};
+  const providerStatus = {};
+  const updatedTimes = [];
+  let stale = false;
+
+  for (const entry of Object.entries(symbolRequests)) {
+    const symbol = entry[0];
+    const request = entry[1];
+    const record = records[request.storageKey];
+    const points = storedSeries[symbol] || [];
+    if (record && record.providerStatus) providerStatus[symbol] = record.providerStatus;
+    if (record && record.updatedAt) updatedTimes.push(record.updatedAt);
+    if (!record || record.providerStatus.ok === false
+      || isStale(record.updatedAt, MAX_AGE_SECONDS.historical)) stale = true;
+
+    if (!points.length) {
+      errors[symbol] = historicalSymbolError(record);
+      stale = true;
+      continue;
+    }
+    series[symbol] = normalizeHistoricalPoints(points, request.resolution);
+  }
+
+  const hasSeries = Object.keys(series).length > 0;
   return jsonResponse({
-    s: metadata.stale ? 'stale' : 'ok',
-    ...(metadata.stale ? { reason: failure ? failure.code || 'provider_unavailable' : 'expired' } : {}),
-    updatedAt: metadata.updatedAt,
-    stale: metadata.stale,
-    providerStatus: metadata.providerStatus,
+    s: hasSeries ? (stale ? 'stale' : 'ok') : 'no_data',
+    ...(hasSeries && stale ? { reason: 'partial_or_expired' } : {}),
+    ...(!hasSeries ? { reason: 'empty_range' } : {}),
+    updatedAt: updatedTimes.length ? updatedTimes.sort()[0] : null,
+    stale: stale,
+    providerStatus: providerStatus,
+    requests: rangeRequests,
     series: series,
+    errors: errors,
   });
 }
 

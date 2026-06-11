@@ -1324,27 +1324,71 @@ INDICATORS.forEach(function(ind) { visibleIndicators[ind.symbol] = true; });
 // Graph Data Fetching
 // =============================================
 let historicalRequests = {};
+const GRAPH_FAILURE_CACHE_MS = 60 * 1000;
 
-function fetchHistoricalData(days, forceReload) {
-  if (forceReload) delete historicalRequests[days];
-  if (!historicalRequests[days]) {
-    historicalRequests[days] = apiFetch('/historical', { days: days }).catch(function(error) {
-      delete historicalRequests[days];
-      throw error;
-    });
-  }
-  return historicalRequests[days];
+function graphCacheKey(symbol, resolution, days) {
+  return symbol + '_' + resolution + '_' + days;
 }
 
-async function fetchAllGraphData(symbols, resolution, days, forceRefresh) {
-  var response = await fetchHistoricalData(days, forceRefresh);
-  var results = {};
+function historicalRequestKey(requests) {
+  return JSON.stringify(requests);
+}
 
-  symbols.forEach(function(symbol) {
-    var ck = symbol + '_' + resolution + '_' + days;
-    var series = response.series[symbol] || null;
-    graphDataCache[ck] = series;
-    results[symbol] = series;
+function fetchHistoricalData(requests, forceReload) {
+  var requestKey = historicalRequestKey(requests);
+  if (forceReload) delete historicalRequests[requestKey];
+  if (!historicalRequests[requestKey]) {
+    var request = apiFetch('/historical', {
+      requests: JSON.stringify(requests)
+    });
+    historicalRequests[requestKey] = request;
+    request.then(function() {
+      if (historicalRequests[requestKey] === request) delete historicalRequests[requestKey];
+    }, function() {
+      if (historicalRequests[requestKey] === request) delete historicalRequests[requestKey];
+    });
+  }
+  return historicalRequests[requestKey];
+}
+
+function cachedGraphEntry(symbol, resolution, days) {
+  var entry = graphDataCache[graphCacheKey(symbol, resolution, days)];
+  if (!entry) return null;
+  if (entry.series) return entry;
+  if (entry.expiresAt && entry.expiresAt > Date.now()) return entry;
+  delete graphDataCache[graphCacheKey(symbol, resolution, days)];
+  return null;
+}
+
+async function fetchAllGraphData(requests, forceRefresh) {
+  var results = {};
+  var allCached = !forceRefresh;
+
+  requests.forEach(function(request) {
+    request.symbols.forEach(function(symbol) {
+      var entry = cachedGraphEntry(symbol, request.resolution, request.days);
+      if (!entry) allCached = false;
+      else results[symbol] = entry.series;
+    });
+  });
+  if (allCached) return results;
+
+  var response = await fetchHistoricalData(requests, forceRefresh);
+  requests.forEach(function(request) {
+    request.symbols.forEach(function(symbol) {
+      var ck = graphCacheKey(symbol, request.resolution, request.days);
+      var series = response.series[symbol] || null;
+      graphDataCache[ck] = series ? {
+        series: series,
+        error: null,
+        expiresAt: null
+      } : {
+        series: null,
+        error: response.errors[symbol] || { code: 'no_data' },
+        expiresAt: Date.now() + GRAPH_FAILURE_CACHE_MS
+      };
+      results[symbol] = series;
+    });
   });
 
   return results;
@@ -1352,8 +1396,7 @@ async function fetchAllGraphData(symbols, resolution, days, forceRefresh) {
 
 function isGraphDataCached(symbols, resolution, days) {
   for (var i = 0; i < symbols.length; i++) {
-    var ck = symbols[i] + '_' + resolution + '_' + days;
-    if (!graphDataCache.hasOwnProperty(ck) || graphDataCache[ck] === null) return false;
+    if (!cachedGraphEntry(symbols[i], resolution, days)) return false;
   }
   return true;
 }
@@ -1584,7 +1627,7 @@ function formatDateLabel(ts, resolution) {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-async function refreshStockGraph(forceRefresh) {
+async function refreshStockGraph(forceRefresh, prefetchedData) {
   var tr = getTimeRange(activeStockTimeRange);
   var symbols = STOCKS.map(function(s) { return s.symbol; });
   var loadingEl = document.getElementById('stocksGraphLoading');
@@ -1599,7 +1642,11 @@ async function refreshStockGraph(forceRefresh) {
     canvas.style.display = 'none';
   }
 
-  var data = await fetchAllGraphData(symbols, tr.resolution, tr.days, forceRefresh);
+  var data = prefetchedData || await fetchAllGraphData([{
+    symbols: symbols,
+    resolution: tr.resolution,
+    days: tr.days
+  }], forceRefresh);
 
   loadingEl.style.display = 'none';
   canvas.style.display = 'block';
@@ -1638,7 +1685,7 @@ async function refreshStockGraph(forceRefresh) {
   });
 }
 
-async function refreshIndicatorGraph(forceRefresh) {
+async function refreshIndicatorGraph(forceRefresh, prefetchedData) {
   var tr = getTimeRange(activeIndicatorTimeRange);
   var symbols = INDICATORS.map(function(ind) { return ind.symbol; });
   var loadingEl = document.getElementById('indicatorsGraphLoading');
@@ -1653,7 +1700,11 @@ async function refreshIndicatorGraph(forceRefresh) {
     canvas.style.display = 'none';
   }
 
-  var data = await fetchAllGraphData(symbols, tr.resolution, tr.days, forceRefresh);
+  var data = prefetchedData || await fetchAllGraphData([{
+    symbols: symbols,
+    resolution: tr.resolution,
+    days: tr.days
+  }], forceRefresh);
 
   loadingEl.style.display = 'none';
   canvas.style.display = 'block';
@@ -1693,8 +1744,25 @@ async function refreshIndicatorGraph(forceRefresh) {
 }
 
 async function refreshAllGraphs(forceRefresh) {
-  await refreshStockGraph(forceRefresh);
-  await refreshIndicatorGraph(forceRefresh);
+  var stockRange = getTimeRange(activeStockTimeRange);
+  var indicatorRange = getTimeRange(activeIndicatorTimeRange);
+  var requests = [
+    {
+      symbols: STOCKS.map(function(stock) { return stock.symbol; }),
+      resolution: stockRange.resolution,
+      days: stockRange.days
+    },
+    {
+      symbols: INDICATORS.map(function(indicator) { return indicator.symbol; }),
+      resolution: indicatorRange.resolution,
+      days: indicatorRange.days
+    }
+  ];
+  var data = await fetchAllGraphData(requests, forceRefresh);
+  await Promise.all([
+    refreshStockGraph(forceRefresh, data),
+    refreshIndicatorGraph(forceRefresh, data)
+  ]);
 }
 
 function redrawGraphsIfVisible() {

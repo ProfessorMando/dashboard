@@ -28,3 +28,10 @@ export const CRON_JOBS = {
   '22 3 * * *': ['profiles'],
   '42 3 * * *': ['historical'],
 };
+
+export const HISTORICAL_SERIES = {
+  provider: 'alphaVantage',
+  providerFunction: 'TIME_SERIES_DAILY',
+  outputSize: 'full',
+  normalizationVersion: 'v1',
+};
